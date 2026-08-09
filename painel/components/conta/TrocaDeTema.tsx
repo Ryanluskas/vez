@@ -9,16 +9,26 @@ export function TrocaDeTema() {
   const [tema, setTema] = useState<Tema>("escuro");
 
   useEffect(() => {
-    setTema(
-      document.documentElement.getAttribute("data-tema") === "claro"
-        ? "claro"
-        : "escuro"
-    );
+    /*
+      Le do localStorage, nao do atributo do <html>: em desenvolvimento o
+      Strict Mode remonta uma vez e, nessa remontagem, o React reseta os
+      atributos do <html> que nao vem do JSX — apagando justamente o que o
+      script anti-flash tinha posto. Quem manda e o localStorage.
+    */
+    let salvo: string | null = null;
+    try {
+      salvo = localStorage.getItem("vez:tema");
+    } catch {
+      // Navegador sem storage: fica no padrão escuro.
+    }
+
+    const atual: Tema = salvo === "claro" ? "claro" : "escuro";
+    document.documentElement.setAttribute("data-tema", atual);
+    setTema(atual);
   }, []);
 
   function aplicar(novo: Tema) {
-    if (novo === "claro") document.documentElement.setAttribute("data-tema", "claro");
-    else document.documentElement.removeAttribute("data-tema");
+    document.documentElement.setAttribute("data-tema", novo);
     try {
       localStorage.setItem("vez:tema", novo);
     } catch {

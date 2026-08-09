@@ -38,8 +38,12 @@ export const viewport: Viewport = {
   ],
 };
 
-/* Le o tema salvo antes da primeira pintura, senao o painel pisca branco. */
-const semPiscar = `(function(){try{var t=localStorage.getItem("vez:tema");if(t==="claro")document.documentElement.setAttribute("data-tema","claro")}catch(e){}})()`;
+/*
+  Le o tema salvo antes da primeira pintura, senao o painel pisca escuro
+  pra quem escolheu claro. Roda enquanto o navegador ainda esta lendo o
+  HTML — antes do React existir, entao nao adianta useEffect aqui.
+*/
+const semPiscar = `(function(){try{var t=localStorage.getItem("vez:tema");if(t)document.documentElement.setAttribute("data-tema",t)}catch(e){}})()`;
 
 export default function RootLayout({
   children,
@@ -47,7 +51,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="pt-BR" className={`${display.variable} ${sans.variable} ${mono.variable} h-full`}>
+    <html
+      lang="pt-BR"
+      data-tema="escuro"
+      /* O script acima troca este atributo antes do React montar. Sem isto,
+         o React reclama que o servidor e o cliente discordam — e discordam
+         mesmo, de proposito. Aqui o DOM ganha. */
+      suppressHydrationWarning
+      className={`${display.variable} ${sans.variable} ${mono.variable} h-full`}
+    >
       <head>
         <script dangerouslySetInnerHTML={{ __html: semPiscar }} />
       </head>
