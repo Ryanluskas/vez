@@ -1,0 +1,139 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   Vez — sistema de tokens
+   Base preto-tinta quente (nao cinza-ardosia). Uma cor de destaque: jade.
+   Brasa e morno sao SEMANTICOS: so aparecem para indicar tempo de espera.
+   Todo token vive em duas versoes; o tema troca as variaveis, nao as classes.
+--------------------------------------------------------------------------- */
+
+@theme inline {
+  --color-fundo: var(--v-fundo);
+  --color-sup: var(--v-sup);
+  --color-sup2: var(--v-sup2);
+  --color-fio: var(--v-fio);
+  --color-fio-forte: var(--v-fio-forte);
+
+  --color-texto: var(--v-texto);
+  --color-texto2: var(--v-texto2);
+  --color-texto3: var(--v-texto3);
+
+  --color-jade: var(--v-jade);
+  --color-jade-forte: var(--v-jade-forte);
+  --color-jade-fundo: var(--v-jade-fundo);
+  --color-jade-texto: var(--v-jade-texto);
+
+  --color-brasa: var(--v-brasa);
+  --color-morno: var(--v-morno);
+  --color-erro: var(--v-erro);
+  --color-erro-fundo: var(--v-erro-fundo);
+
+  --font-display: var(--fonte-display);
+  --font-sans: var(--fonte-sans);
+  --font-mono: var(--fonte-mono);
+}
+
+/* Escuro e o padrao do produto. */
+:root {
+  --v-fundo: #14110e;
+  --v-sup: #1c1915;
+  --v-sup2: #23201a;
+  --v-fio: #2c2721;
+  --v-fio-forte: #3b342b;
+
+  --v-texto: #f2ede4;
+  --v-texto2: #a0968a;
+  --v-texto3: #726a60;
+
+  --v-jade: #1fa173;
+  --v-jade-forte: #26b884;
+  --v-jade-fundo: #12291f;
+  --v-jade-texto: #06120d;
+
+  --v-brasa: #e08a3c;
+  --v-morno: #b8874a;
+  --v-erro: #d2593f;
+  --v-erro-fundo: #2b1611;
+
+  color-scheme: dark;
+}
+
+/* Claro: papel quente, mesma familia de neutros. */
+:root[data-tema="claro"] {
+  --v-fundo: #faf7f1;
+  --v-sup: #ffffff;
+  --v-sup2: #f3efe7;
+  --v-fio: #e4ded2;
+  --v-fio-forte: #cfc7b8;
+
+  --v-texto: #1a1611;
+  --v-texto2: #6b6255;
+  --v-texto3: #948b7c;
+
+  --v-jade: #157a57;
+  --v-jade-forte: #10684a;
+  --v-jade-fundo: #e3f2eb;
+  --v-jade-texto: #ffffff;
+
+  --v-brasa: #b4671f;
+  --v-morno: #8a6530;
+  --v-erro: #b23f27;
+  --v-erro-fundo: #fbeae5;
+
+  color-scheme: light;
+}
+
+@layer base {
+  * {
+    border-color: var(--v-fio);
+  }
+
+  body {
+    background: var(--v-fundo);
+    color: var(--v-texto);
+    font-family: var(--fonte-sans);
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+
+  /* Numeros nunca dancam: tabular em toda a interface. */
+  .num {
+    font-family: var(--fonte-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+  }
+
+  /* Foco visivel de verdade, sem halo generico. */
+  :focus-visible {
+    outline: 2px solid var(--v-jade);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  ::selection {
+    background: var(--v-jade);
+    color: var(--v-jade-texto);
+  }
+
+  ::placeholder {
+    color: var(--v-texto3);
+  }
+}
+
+/* Etiqueta de secao: mono, caixa alta, tracking largo. Usada com parcimonia. */
+.rotulo {
+  font-family: var(--fonte-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--v-texto3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

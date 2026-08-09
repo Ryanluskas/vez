@@ -1,0 +1,21 @@
+node_modules/
+.next/
+out/
+build/
+
+# Chaves — nunca versionar
+.env
+.env.local
+.env*.local
+
+# Sessão do WhatsApp do motor (Fase 2): contém credenciais do pareamento
+motor/.wwebjs_auth/
+motor/.wwebjs_cache/
+motor/sessao/
+
+.DS_Store
+*.log
+npm-debug.log*
+.vercel
+*.tsbuildinfo
+next-env.d.ts
