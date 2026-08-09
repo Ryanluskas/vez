@@ -1,5 +1,6 @@
 import { classificar } from "./classificar.js";
 import { escreverResposta, escreverComResposta } from "./redator.js";
+import { exemplosComBase } from "./estilo.js";
 import { log } from "./log.js";
 
 /* Quantas mensagens vao no contexto que a IA le e que aparece no painel. */
@@ -85,7 +86,11 @@ export function criarFluxo(supabase, userId) {
       .join("\n");
   }
 
-  /* O coracao do few-shot: as respostas que ELE aprovou, da mesma gaveta. */
+  /*
+    O coracao do few-shot: as respostas que ELE aprovou, da mesma gaveta.
+    Se a gaveta ainda estiver vazia — dia 1 de uso — completa com o estilo
+    de fabrica, senao o bot escreve como robo de banco na primeira semana.
+  */
   async function exemplosDaCategoria(categoria) {
     const { data } = await supabase
       .from("respostas_boas")
@@ -94,7 +99,7 @@ export function criarFluxo(supabase, userId) {
       .order("criado_em", { ascending: false })
       .limit(EXEMPLOS_NO_PROMPT);
 
-    return data ?? [];
+    return exemplosComBase(data, categoria, EXEMPLOS_NO_PROMPT);
   }
 
   async function jaTemPendenciaAberta(idConversa) {
