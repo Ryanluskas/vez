@@ -1,6 +1,12 @@
 import { lerAmbiente } from "./ambiente.js";
 import { criarClienteDoMotor, entrarNaConta } from "./supabase.js";
-import { ollamaVivo, modeloDisponivel, modeloEmUso, enderecoDoOllama } from "./ollama.js";
+import {
+  ollamaVivo,
+  modeloDisponivel,
+  aquecer,
+  modeloEmUso,
+  enderecoDoOllama,
+} from "./ollama.js";
 import { classificar } from "./classificar.js";
 import { checarGatilhos } from "./gatilhos.js";
 
@@ -68,6 +74,19 @@ async function checarIa() {
     return false;
   }
   ok(`Modelo ${modeloEmUso} pronto`);
+
+  const segundos = await aquecer();
+  if (segundos === null) {
+    aviso("não consegui carregar o modelo na memória", "a máquina pode estar sem RAM livre");
+  } else if (segundos > 25) {
+    aviso(
+      `carregar o modelo levou ${segundos}s — esta máquina é lenta para 3B`,
+      `considere um modelo menor: OLLAMA_MODELO=llama3.2:1b`
+    );
+  } else {
+    ok(`Modelo carregado na memória em ${segundos}s`);
+  }
+
   return true;
 }
 

@@ -8,7 +8,18 @@ const MODELO = process.env.OLLAMA_MODELO || "llama3.2:3b";
   Um minuto e muito, mas e melhor esperar do que desistir no meio e mandar
   pra fila uma coisa que o bot daria conta.
 */
-const PACIENCIA_MS = 60_000;
+const PACIENCIA_MS = 90_000;
+
+/*
+  Mantem o modelo na RAM entre uma mensagem e outra.
+
+  Sem isso, o Ollama descarrega o modelo depois de 5 minutos parado e a
+  proxima mensagem paga 40s so pra recarregar 2GB do disco — foi exatamente
+  o que estourou o timeout no primeiro diagnostico. Consultor recebe mensagem
+  em rajada e depois fica uma hora sem nada; 30 minutos cobrem o vai e vem
+  de um atendimento inteiro.
+*/
+const MANTER_NA_RAM = "30m";
 
 /* O Ollama esta de pe? Usado no boot e antes de cada classificacao. */
 export async function ollamaVivo() {
@@ -54,6 +65,7 @@ export async function gerar({ prompt, sistema, json = false, temperatura = 0.3 }
         prompt,
         system: sistema,
         stream: false,
+        keep_alive: MANTER_NA_RAM,
         ...(json ? { format: "json" } : {}),
         options: {
           temperature: temperatura,
@@ -96,6 +108,34 @@ export async function gerarJson({ prompt, sistema }) {
       log.erro("Ollama devolveu JSON quebrado. Mandando pra fila.");
       return null;
     }
+  }
+}
+
+/*
+  Carrega o modelo na RAM antes do primeiro cliente aparecer.
+
+  O motor liga, gasta 40s aquecendo enquanto ninguem esta esperando, e a
+  primeira mensagem de verdade ja pega o modelo quente. Sem isso, quem paga
+  a espera do carregamento e o primeiro cliente do dia.
+*/
+export async function aquecer() {
+  const inicio = Date.now();
+  try {
+    await fetch(`${ENDERECO}/api/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(PACIENCIA_MS),
+      body: JSON.stringify({
+        model: MODELO,
+        prompt: "oi",
+        stream: false,
+        keep_alive: MANTER_NA_RAM,
+        options: { num_predict: 1 },
+      }),
+    });
+    return Math.round((Date.now() - inicio) / 1000);
+  } catch {
+    return null;
   }
 }
 

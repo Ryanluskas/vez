@@ -4,7 +4,13 @@ import { criarEstado } from "./estado.js";
 import { criarFluxo } from "./fluxo.js";
 import { criarEscuta } from "./escuta.js";
 import { criarWhatsApp } from "./whatsapp.js";
-import { ollamaVivo, modeloDisponivel, modeloEmUso, enderecoDoOllama } from "./ollama.js";
+import {
+  ollamaVivo,
+  modeloDisponivel,
+  aquecer,
+  modeloEmUso,
+  enderecoDoOllama,
+} from "./ollama.js";
 import { log } from "./log.js";
 
 /*
@@ -31,7 +37,14 @@ async function conferirIa() {
     return false;
   }
 
-  log.info(`IA pronta: ${modeloEmUso} em ${enderecoDoOllama}`);
+  log.info(`IA pronta: ${modeloEmUso}. Carregando na memória…`);
+
+  // Enquanto o WhatsApp ainda nem abriu, ninguem esta esperando resposta.
+  // E a hora certa de pagar o custo de carregar o modelo.
+  const segundos = await aquecer();
+  if (segundos === null) log.alerta("Não consegui aquecer o modelo; a primeira resposta vai demorar.");
+  else log.info(`Modelo quente em ${segundos}s. Fica na memória por 30 minutos.`);
+
   return true;
 }
 
