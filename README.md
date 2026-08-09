@@ -35,11 +35,12 @@ API de IA paga.
 ## Rodar o painel
 
 **1. Criar o projeto no Supabase.** Em [supabase.com](https://supabase.com), plano
-gratuito. Em *Project Settings → API*, copie a **Project URL** e a chave **anon
-public**.
+gratuito. Em *Project Settings → API Keys*, copie a **Project URL** e a chave
+**publishable** (`sb_publishable_...`).
 
 **2. Colar as chaves.** Copie `painel/.env.local.example` para `painel/.env.local` e
-preencha. A chave `service_role` não entra aqui — quem protege os dados é o RLS.
+preencha. A chave `sb_secret_...` **nunca** entra aqui: ela ignora o RLS, e é o RLS
+que separa um consultor do outro.
 
 **3. Criar as tabelas.** No *SQL Editor* do Supabase, rode nesta ordem:
 
@@ -99,9 +100,15 @@ isso é a Fase 3.
 Importe o repositório e, nas configurações do projeto:
 
 - **Root Directory:** `painel`
-- **Environment Variables:** `NEXT_PUBLIC_SUPABASE_URL` e `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- **Environment Variables:** `NEXT_PUBLIC_SUPABASE_URL` e
+  `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+- **Deployment Protection → Vercel Authentication:** desligado, senão só o dono da
+  conta Vercel consegue abrir o painel
 
-O `motor/` fica de fora do deploy — ele só existe na máquina do consultor.
+As duas variáveis são `NEXT_PUBLIC_`, ou seja, são gravadas no bundle na hora do
+build. Mudou o valor, precisa **redeploy** — não basta salvar.
+
+O `motor/` fica de fora do deploy: ele só existe na máquina do consultor.
 
 ## Estrutura
 
