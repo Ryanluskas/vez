@@ -120,7 +120,7 @@ export function criarWhatsApp({ estado, fluxo }) {
         nome = contato?.name || contato?.pushname || null;
       }
 
-      await fluxo.registrar({
+      const conversa = await fluxo.registrar({
         telefone,
         nome,
         texto,
@@ -132,6 +132,15 @@ export function criarWhatsApp({ estado, fluxo }) {
           texto.length > 60 ? "…" : ""
         }`
       );
+
+      /*
+        So mensagem de cliente aciona o cerebro. O que o consultor manda do
+        proprio celular fica gravado (vira material de estilo na Fase 5), mas
+        nao dispara classificacao — senao o bot responderia a si mesmo.
+      */
+      if (!msg.fromMe) {
+        await fluxo.processarRecebida(conversa, texto, nome);
+      }
     } catch (erro) {
       // Uma mensagem que falha nao pode derrubar o atendimento das outras.
       log.erro("Não consegui registrar uma mensagem:", erro.message);

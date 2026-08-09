@@ -11,6 +11,7 @@ type LinhaDaFila = {
   id: string;
   pergunta: string;
   contexto: string | null;
+  motivo: string | null;
   criado_em: string;
   conversas: { nome: string | null; telefone: string } | null;
 };
@@ -25,7 +26,7 @@ export default async function PaginaDaFila() {
   */
   const { data, error } = await supabase
     .from("pendencias")
-    .select("id, pergunta, contexto, criado_em, conversas(nome, telefone)")
+    .select("id, pergunta, contexto, motivo, criado_em, conversas(nome, telefone)")
     .eq("status", "aberta")
     .order("criado_em", { ascending: true })
     .returns<LinhaDaFila[]>();
@@ -66,12 +67,14 @@ export default async function PaginaDaFila() {
             {pendencias.map((p) => (
               <ItemDaFila
                 key={p.id}
+                id={p.id}
                 criadoEm={p.criado_em}
                 agoraServidor={agoraServidor}
                 nome={p.conversas?.nome ?? "Sem nome"}
                 telefone={p.conversas?.telefone ?? ""}
                 pergunta={p.pergunta}
                 contexto={p.contexto}
+                motivo={p.motivo}
               />
             ))}
           </div>

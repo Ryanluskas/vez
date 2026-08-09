@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/cn";
+import { Responder } from "./Responder";
 import {
   COR_DA_BORDA,
   COR_DO_TEXTO,
@@ -10,6 +11,7 @@ import {
 } from "./espera";
 
 export type ItemDaFilaProps = {
+  id: string;
   criadoEm: string;
   /* Instante do servidor no momento da renderizacao: mantem o primeiro
      paint identico no servidor e no cliente, sem piscar. */
@@ -18,15 +20,19 @@ export type ItemDaFilaProps = {
   telefone: string;
   pergunta: string;
   contexto: string | null;
+  /* Por que essa conversa congelou, em portugues. */
+  motivo: string | null;
 };
 
 export function ItemDaFila({
+  id,
   criadoEm,
   agoraServidor,
   nome,
   telefone,
   pergunta,
   contexto,
+  motivo,
 }: ItemDaFilaProps) {
   const inicio = new Date(criadoEm).getTime();
   const [esperaMs, setEsperaMs] = useState(
@@ -68,6 +74,10 @@ export function ItemDaFila({
 
       <p className="mt-1.5 text-[14px] leading-relaxed text-texto">{pergunta}</p>
 
+      {motivo ? (
+        <p className="mt-1 text-[11px] text-texto3">Travou porque {motivo}.</p>
+      ) : null}
+
       {contexto ? (
         <details className="mt-2 group">
           <summary className="cursor-pointer list-none text-[12px] text-texto2 transition-colors hover:text-texto">
@@ -79,6 +89,8 @@ export function ItemDaFila({
           </pre>
         </details>
       ) : null}
+
+      <Responder idPendencia={id} />
     </article>
   );
 }

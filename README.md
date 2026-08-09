@@ -27,10 +27,11 @@ API de IA paga.
 
 - [x] **Fase 1** — painel, cadastro/login, RLS, identidade visual
 - [x] **Fase 2** — motor local, WhatsApp, QR na tela Conexão, mensagens no banco
-- [ ] **Fase 3** — classificação com Ollama, fila viva
-- [ ] **Fase 4** — rascunhos, aprovar e enviar
-- [ ] **Fase 5** — aprender o jeito de falar (few-shot)
+- [x] **Fase 3** — classificação com Ollama, regra rígida de valor, fila viva
+- [x] **Fase 4** — rascunhos, aprovar/editar e enviar
+- [x] **Fase 5** — aprender o jeito de falar (few-shot)
 - [ ] **Fase 6** — polimento
+- [ ] **Fase 7** — empacotar o motor num instalador Windows
 
 ## Rodar o painel
 
@@ -44,9 +45,13 @@ que separa um consultor do outro.
 
 **3. Criar as tabelas.** No *SQL Editor* do Supabase, rode nesta ordem:
 
+Ou cole o `banco/tudo.sql`, que é os quatro juntos e pode ser rodado de novo sem
+quebrar nada. Separados, na ordem:
+
 - `banco/01_tabelas.sql`
 - `banco/02_rls.sql`
 - `banco/03_conexoes.sql`
+- `banco/04_fase3.sql`
 
 O `02` é o que isola os dados de cada consultor. A consulta no fim dele confere: as
 cinco tabelas têm que aparecer com `rls_ligado = true` e 4 políticas cada.
@@ -92,8 +97,57 @@ No celular: WhatsApp → Aparelhos conectados → Conectar um aparelho.
 Depois de pareado, toda mensagem que chegar cai em **Conversas**. O motor precisa
 ficar aberto enquanto você quiser ser atendido; fechar a janela apaga a luz no painel.
 
-Nesta fase o motor **só escuta e registra**. Ele ainda não classifica nem responde —
-isso é a Fase 3.
+## Ligar a IA
+
+O motor roda sem IA — mas aí **tudo** vira pendência e você atende na mão. Para o bot
+começar a trabalhar:
+
+1. Instale o [Ollama](https://ollama.com/download)
+2. `ollama pull llama3.2:3b` (~2 GB, uma vez só)
+
+Depois disso é offline e sem mensalidade. O motor confere no boot e avisa se a IA não
+estiver de pé — ele nunca finge que está pensando.
+
+Dá para trocar o modelo por variável: `OLLAMA_MODELO=qwen2.5:3b npm start --prefix motor`.
+
+## Como o bot decide
+
+Chegou mensagem de cliente:
+
+1. **Regra rígida primeiro.** `motor/src/gatilhos.js` procura qualquer sinal de
+   dinheiro — valor, parcela, saldo, margem, juros, simulação, número em reais. Se
+   achar, vai direto para a Fila e a IA **nem é chamada**.
+2. **Depois a IA classifica.** Devolve categoria e se precisa de você. Só um `false`
+   explícito libera o bot; qualquer resposta estranha, timeout ou Ollama fora do ar
+   cai na Fila.
+3. **Se o bot pode responder**, ele escreve imitando seu jeito (few-shot com as
+   respostas que você já aprovou, da mesma categoria) e deixa em Rascunhos.
+4. **Se ele não souber escrever sem chutar**, vai para a Fila mesmo assim.
+5. **Última barreira:** antes de virar rascunho, o texto gerado passa de novo pelos
+   gatilhos. Se a IA alucinou um "R$ 5.000", o rascunho é jogado fora e a conversa vai
+   para a Fila.
+
+A regra rígida só sabe **forçar** "precisa do consultor". Não existe caminho no código
+em que a IA desligue essa trava. Há teste para isso:
+
+```bash
+npm test --prefix motor
+```
+
+## O ciclo completo
+
+```
+cliente pergunta  →  Fila  →  você digita só o dado ("R$ 4.200, 12x de 380")
+                                     ↓
+                        motor escreve no seu tom  →  Rascunhos
+                                     ↓
+                    você lê, edita se quiser, aprova  →  WhatsApp do cliente
+                                     ↓
+                     a mensagem aprovada vira exemplo em "Meu jeito"
+```
+
+Nada é enviado sem passar pela sua aprovação, e o que sai é exatamente o texto que
+estava na tela quando você clicou.
 
 ## Publicar na Vercel
 
@@ -126,7 +180,12 @@ motor/          Node local
     supabase.js   login na conta, com sessão guardada em arquivo
     estado.js     espelha o estado do motor na tabela conexoes (batida de 30s)
     whatsapp.js   cliente do WhatsApp, QR e eventos
-    fluxo.js      grava conversa e mensagem no banco
+    gatilhos.js   A REGRA DE OURO — o que nunca chega na IA
+    classificar.js  regra rígida + Ollama, nessa ordem
+    redator.js    escreve no seu tom (few-shot) e se recusa a inventar número
+    fluxo.js      decide entre abrir pendência ou escrever rascunho
+    escuta.js     ouve o painel: respostas da fila e rascunhos aprovados
+  test/           teste da regra de ouro — 40 frases reais
   sessao/         credenciais do pareamento — gitignorado
 ```
 

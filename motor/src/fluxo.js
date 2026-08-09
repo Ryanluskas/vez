@@ -1,20 +1,23 @@
+import { classificar } from "./classificar.js";
+import { escreverResposta, escreverComResposta } from "./redator.js";
 import { log } from "./log.js";
 
-/*
-  Fase 2: o motor so escuta e registra. Nao classifica, nao responde,
-  nao cria pendencia — isso e a Fase 3. Aqui a unica promessa e:
-  nenhuma mensagem se perde e cada uma cai na conversa certa.
-*/
+/* Quantas mensagens vao no contexto que a IA le e que aparece no painel. */
+const TAMANHO_DO_CONTEXTO = 4;
+
+/* Quantos exemplos do "Meu jeito" entram no prompt. Mais que isso, o modelo
+   pequeno perde o fio e comeca a copiar o exemplo em vez de imitar o tom. */
+const EXEMPLOS_NO_PROMPT = 3;
+
 export function criarFluxo(supabase, userId) {
-  /*
-    Acha (ou cria) a conversa daquele telefone e atualiza o resumo.
-    Nao usa upsert de proposito: upsert reescreveria o `estagio`, e o
-    estagio e o que diz se a conversa esta congelada esperando o consultor.
-  */
+  /* ------------------------------------------------------------------
+     Conversa
+  ------------------------------------------------------------------ */
+
   async function garantirConversa({ telefone, nome, ultimaMensagem }) {
     const { data: existente, error: erroDaBusca } = await supabase
       .from("conversas")
-      .select("id, nome")
+      .select("id, nome, estagio")
       .eq("telefone", telefone)
       .maybeSingle();
 
@@ -31,12 +34,12 @@ export function criarFluxo(supabase, userId) {
           ultima_mensagem: ultimaMensagem,
           atualizado_em: new Date().toISOString(),
         })
-        .select("id")
+        .select("id, nome, estagio")
         .single();
 
       if (error) throw new Error(`criar conversa: ${error.message}`);
       log.info(`Cliente novo: ${nome ?? telefone}`);
-      return nova.id;
+      return nova;
     }
 
     const { error } = await supabase
@@ -51,12 +54,110 @@ export function criarFluxo(supabase, userId) {
       .eq("id", existente.id);
 
     if (error) throw new Error(`atualizar conversa: ${error.message}`);
-    return existente.id;
+    return existente;
+  }
+
+  async function mudarEstagio(idConversa, estagio) {
+    await supabase
+      .from("conversas")
+      .update({ estagio, atualizado_em: new Date().toISOString() })
+      .eq("id", idConversa);
+  }
+
+  /* ------------------------------------------------------------------
+     Leituras auxiliares
+  ------------------------------------------------------------------ */
+
+  /* Ultimas mensagens da conversa, em texto corrido, mais velha primeiro. */
+  async function contextoDaConversa(idConversa) {
+    const { data } = await supabase
+      .from("mensagens")
+      .select("direcao, texto")
+      .eq("id_conversa", idConversa)
+      .order("criado_em", { ascending: false })
+      .limit(TAMANHO_DO_CONTEXTO);
+
+    if (!data?.length) return null;
+
+    return data
+      .reverse()
+      .map((m) => `${m.direcao === "recebida" ? "Cliente" : "Você"}: ${m.texto}`)
+      .join("\n");
+  }
+
+  /* O coracao do few-shot: as respostas que ELE aprovou, da mesma gaveta. */
+  async function exemplosDaCategoria(categoria) {
+    const { data } = await supabase
+      .from("respostas_boas")
+      .select("mensagem_cliente, resposta_ryan")
+      .eq("categoria", categoria)
+      .order("criado_em", { ascending: false })
+      .limit(EXEMPLOS_NO_PROMPT);
+
+    return data ?? [];
+  }
+
+  async function jaTemPendenciaAberta(idConversa) {
+    const { count } = await supabase
+      .from("pendencias")
+      .select("id", { count: "exact", head: true })
+      .eq("id_conversa", idConversa)
+      .eq("status", "aberta");
+
+    return (count ?? 0) > 0;
+  }
+
+  /* ------------------------------------------------------------------
+     Escrita
+  ------------------------------------------------------------------ */
+
+  async function abrirPendencia({ idConversa, pergunta, contexto, categoria, motivo }) {
+    // Cliente ansioso manda tres mensagens seguidas. Isso e uma pessoa na
+    // fila, nao tres — senao a ordem de chegada vira mentira.
+    if (await jaTemPendenciaAberta(idConversa)) {
+      log.info("Já tinha pendência aberta nessa conversa; não dupliquei.");
+      return null;
+    }
+
+    const { data, error } = await supabase
+      .from("pendencias")
+      .insert({
+        user_id: userId,
+        id_conversa: idConversa,
+        pergunta,
+        contexto,
+        categoria,
+        motivo,
+        status: "aberta",
+      })
+      .select("id")
+      .single();
+
+    if (error) throw new Error(`abrir pendencia: ${error.message}`);
+
+    // Congela: daqui pra frente o bot nao toca nesta conversa ate voce responder.
+    await mudarEstagio(idConversa, "aguardando_voce");
+    return data.id;
+  }
+
+  async function abrirRascunho({ idConversa, texto, categoria, idPendencia = null }) {
+    const { error } = await supabase.from("rascunhos").insert({
+      user_id: userId,
+      id_conversa: idConversa,
+      texto_sugerido: texto,
+      categoria,
+      id_pendencia: idPendencia,
+      status: "pendente",
+    });
+
+    if (error) throw new Error(`abrir rascunho: ${error.message}`);
+    await mudarEstagio(idConversa, "rascunho_pronto");
   }
 
   return {
+    /* Grava a mensagem crua. Vale pros dois lados da conversa. */
     async registrar({ telefone, nome, texto, direcao }) {
-      const idConversa = await garantirConversa({
+      const conversa = await garantirConversa({
         telefone,
         nome,
         ultimaMensagem: texto,
@@ -64,13 +165,125 @@ export function criarFluxo(supabase, userId) {
 
       const { error } = await supabase.from("mensagens").insert({
         user_id: userId,
-        id_conversa: idConversa,
+        id_conversa: conversa.id,
         direcao,
         texto,
       });
 
       if (error) throw new Error(`salvar mensagem: ${error.message}`);
-      return idConversa;
+      return conversa;
     },
+
+    /*
+      O cerebro da Fase 3. Roda depois de gravar uma mensagem RECEBIDA.
+
+      Ordem: congelada? -> classifica -> ou abre pendencia, ou escreve rascunho.
+      Todo caminho de erro cai na fila. Nenhum caminho manda mensagem sozinho.
+    */
+    async processarRecebida(conversa, texto, nomeCliente) {
+      // Conversa congelada esperando o consultor: nao mexe. O cliente pode
+      // mandar mais dez mensagens; elas ficam gravadas e o bot fica quieto.
+      if (conversa.estagio === "aguardando_voce") {
+        log.info("Conversa congelada esperando você. Bot não respondeu.");
+        return;
+      }
+
+      const contexto = await contextoDaConversa(conversa.id);
+      const { categoria, precisaDoRyan, motivo, decidiuNaRegra } = await classificar({
+        texto,
+        contexto,
+      });
+
+      if (precisaDoRyan) {
+        await abrirPendencia({
+          idConversa: conversa.id,
+          pergunta: texto,
+          contexto,
+          categoria,
+          motivo,
+        });
+        log.destaque(
+          `→ FILA  ${nomeCliente ?? ""} · ${motivo}${decidiuNaRegra ? " (regra rígida)" : ""}`
+        );
+        return;
+      }
+
+      const exemplos = await exemplosDaCategoria(categoria);
+      const rascunho = await escreverResposta({
+        mensagemCliente: texto,
+        nomeCliente,
+        contexto,
+        exemplos,
+      });
+
+      // O bot achou que sabia, mas na hora de escrever nao soube sem chutar.
+      // Isso nao e falha: e o produto funcionando. Vai pra fila.
+      if (!rascunho) {
+        await abrirPendencia({
+          idConversa: conversa.id,
+          pergunta: texto,
+          contexto,
+          categoria,
+          motivo: "o bot não soube responder sem chutar",
+        });
+        log.info(`→ fila  ${nomeCliente ?? ""} · o bot não soube escrever`);
+        return;
+      }
+
+      await abrirRascunho({ idConversa: conversa.id, texto: rascunho, categoria });
+      log.info(`→ rascunho  ${nomeCliente ?? ""} · ${categoria}`);
+    },
+
+    /*
+      Voce respondeu uma pendencia no painel. O motor pega a sua resposta,
+      escreve no seu tom e deixa como rascunho pra voce aprovar.
+      A conversa sai do congelamento aqui.
+    */
+    async transformarRespostaEmRascunho(pendencia) {
+      const { data: conversa } = await supabase
+        .from("conversas")
+        .select("id, nome")
+        .eq("id", pendencia.id_conversa)
+        .single();
+
+      const exemplos = await exemplosDaCategoria(pendencia.categoria ?? "outro");
+
+      const texto = await escreverComResposta({
+        mensagemCliente: pendencia.pergunta,
+        respostaDoConsultor: pendencia.resposta,
+        nomeCliente: conversa?.nome,
+        exemplos,
+      });
+
+      await abrirRascunho({
+        idConversa: pendencia.id_conversa,
+        texto,
+        categoria: pendencia.categoria ?? "outro",
+        idPendencia: pendencia.id,
+      });
+
+      log.destaque(`Rascunho pronto para ${conversa?.nome ?? "cliente"}. Aprove no painel.`);
+    },
+
+    /*
+      Fase 5. Toda resposta aprovada vira exemplo. E assim que o bot aprende
+      o jeito de falar, sem treinar nada e sem custo.
+    */
+    async guardarComoExemploBom({ categoria, mensagemCliente, respostaAprovada }) {
+      if (!categoria || !mensagemCliente || !respostaAprovada) return;
+
+      const { error } = await supabase.from("respostas_boas").insert({
+        user_id: userId,
+        categoria,
+        mensagem_cliente: mensagemCliente,
+        resposta_ryan: respostaAprovada,
+      });
+
+      if (error) log.erro(`não consegui guardar o exemplo: ${error.message}`);
+      else log.info(`Aprendi mais um jeito seu de responder "${categoria}".`);
+    },
+
+    contextoDaConversa,
+    mudarEstagio,
   };
 }

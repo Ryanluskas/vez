@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { CabecalhoDeTela, Tela, Vazio } from "@/components/ui/Tela";
+import { ApagarExemplo } from "@/components/conta/ApagarExemplo";
 import { criarClienteServidor } from "@/lib/supabase/servidor";
 import type { RespostaBoa } from "@/lib/tipos";
 
@@ -33,7 +34,10 @@ export default async function PaginaMeuJeito() {
         <div className="border-b border-fio">
           {exemplos.map((e) => (
             <article key={e.id} className="border-t border-fio py-4">
-              <span className="rotulo">{e.categoria}</span>
+              <div className="flex items-center justify-between gap-4">
+                <span className="rotulo">{e.categoria}</span>
+                <ApagarExemplo id={e.id} />
+              </div>
               <p className="mt-2 text-[13px] leading-relaxed text-texto2">
                 <span className="text-texto3">Cliente: </span>
                 {e.mensagem_cliente}

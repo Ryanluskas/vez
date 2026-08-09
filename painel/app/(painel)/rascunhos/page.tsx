@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { CabecalhoDeTela, Tela, Vazio } from "@/components/ui/Tela";
+import { CartaoDeRascunho } from "@/components/rascunhos/CartaoDeRascunho";
 import { criarClienteServidor } from "@/lib/supabase/servidor";
 
 export const metadata: Metadata = { title: "Rascunhos" };
@@ -7,51 +8,76 @@ export const metadata: Metadata = { title: "Rascunhos" };
 type LinhaDeRascunho = {
   id: string;
   texto_sugerido: string;
+  categoria: string | null;
   criado_em: string;
   conversas: { nome: string | null; telefone: string } | null;
+  pendencias: { pergunta: string } | null;
 };
 
 export default async function PaginaDeRascunhos() {
   const supabase = await criarClienteServidor();
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("rascunhos")
-    .select("id, texto_sugerido, criado_em, conversas(nome, telefone)")
+    .select(
+      "id, texto_sugerido, categoria, criado_em, conversas(nome, telefone), pendencias(pergunta)"
+    )
     .eq("status", "pendente")
     .order("criado_em", { ascending: true })
     .returns<LinhaDeRascunho[]>();
 
   const rascunhos = data ?? [];
 
+  // As colunas categoria/id_pendencia nascem no 04_fase3.sql. Sem ele a
+  // consulta falha, e um estado vazio mentiroso seria pior que o recado.
+  if (error) {
+    return (
+      <Tela>
+        <CabecalhoDeTela
+          titulo="Rascunhos"
+          linha="Falta uma parte do banco para esta tela funcionar."
+        />
+        <div className="rounded-lg border border-fio bg-sup p-5">
+          <p className="text-[13px] leading-relaxed text-texto2">
+            Rode <code className="num text-texto">banco/04_fase3.sql</code> no SQL
+            Editor do Supabase e recarregue.
+          </p>
+        </div>
+      </Tela>
+    );
+  }
+
   return (
     <Tela>
       <CabecalhoDeTela
         titulo="Rascunhos"
-        linha="Respostas que o bot escreveu no seu jeito. Nada sai daqui sem você aprovar."
-        rotulo="Nada é enviado sozinho"
+        linha={
+          rascunhos.length === 0
+            ? "Nada esperando aprovação."
+            : `${rascunhos.length} ${
+                rascunhos.length === 1 ? "mensagem escrita" : "mensagens escritas"
+              } no seu jeito, esperando seu aval.`
+        }
+        rotulo="Nada sai sem você ler"
       />
 
       {rascunhos.length === 0 ? (
         <Vazio
           titulo="Nenhum rascunho esperando"
-          corpo="Quando o bot conseguir responder algo sozinho — horário, documentos, dúvida simples — ele escreve aqui e espera seu aval antes de mandar."
+          corpo="Quando o bot conseguir responder algo sozinho, ou quando você responder alguém da Fila, a mensagem aparece aqui pronta — você lê, ajusta se quiser, e só então ela sai."
         />
       ) : (
         <div className="border-b border-fio">
           {rascunhos.map((r) => (
-            <article key={r.id} className="border-t border-fio py-3.5 pr-1 pl-4">
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                <span className="text-[14px] text-texto">
-                  {r.conversas?.nome ?? "Sem nome"}
-                </span>
-                <span className="num text-[12px] text-texto3">
-                  {r.conversas?.telefone ?? ""}
-                </span>
-              </div>
-              <p className="mt-1.5 text-[14px] leading-relaxed text-texto2">
-                {r.texto_sugerido}
-              </p>
-            </article>
+            <CartaoDeRascunho
+              key={r.id}
+              id={r.id}
+              nome={r.conversas?.nome ?? "Sem nome"}
+              telefone={r.conversas?.telefone ?? ""}
+              categoria={r.categoria}
+              textoSugerido={r.texto_sugerido}
+              perguntaOriginal={r.pendencias?.pergunta ?? null}
+            />
           ))}
         </div>
       )}
