@@ -6,6 +6,7 @@
   "description": "Motor local do Vez: conecta o WhatsApp e sincroniza com a conta do consultor no Supabase.",
   "scripts": {
     "start": "node src/index.js",
+    "diagnostico": "node src/diagnostico.js",
     "test": "node --test test/*.test.js"
   },
   "engines": {
