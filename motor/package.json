@@ -1,0 +1,19 @@
+{
+  "name": "vez-motor",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Motor local do Vez: conecta o WhatsApp e sincroniza com a conta do consultor no Supabase.",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "engines": {
+    "node": ">=20.9"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.112.2",
+    "dotenv": "^17.2.4",
+    "qrcode": "^1.5.4",
+    "whatsapp-web.js": "^1.34.1"
+  }
+}

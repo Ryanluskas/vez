@@ -26,7 +26,7 @@ API de IA paga.
 ## Estado atual
 
 - [x] **Fase 1** — painel, cadastro/login, RLS, identidade visual
-- [ ] **Fase 2** — motor local, WhatsApp, QR na tela Conexão
+- [x] **Fase 2** — motor local, WhatsApp, QR na tela Conexão, mensagens no banco
 - [ ] **Fase 3** — classificação com Ollama, fila viva
 - [ ] **Fase 4** — rascunhos, aprovar e enviar
 - [ ] **Fase 5** — aprender o jeito de falar (few-shot)
@@ -45,9 +45,10 @@ preencha. A chave `service_role` não entra aqui — quem protege os dados é o 
 
 - `banco/01_tabelas.sql`
 - `banco/02_rls.sql`
+- `banco/03_conexoes.sql`
 
-O segundo é o que isola os dados de cada consultor. A consulta no fim dele confere:
-as cinco tabelas têm que aparecer com `rls_ligado = true` e 4 políticas cada.
+O `02` é o que isola os dados de cada consultor. A consulta no fim dele confere: as
+cinco tabelas têm que aparecer com `rls_ligado = true` e 4 políticas cada.
 
 **4. Subir o painel.**
 
@@ -64,6 +65,34 @@ Abra `http://localhost:3000`, crie uma conta e você cai na Fila.
 > Se o Supabase estiver com confirmação de e-mail ligada (padrão), você recebe um link
 > antes de conseguir entrar. Para testar sem isso: *Authentication → Sign In / Up →
 > desmarque "Confirm email"*.
+
+## Rodar o motor
+
+O motor é o que conecta seu WhatsApp. Sem ele, o painel fica vazio.
+
+**1. Preencher o `motor/.env`** (copie de `motor/.env.example`): as mesmas duas chaves
+do Supabase, mais o e-mail e a senha da sua conta no painel. O login acontece uma vez;
+depois a sessão fica guardada em `motor/sessao/`.
+
+**2. Instalar e rodar:**
+
+```bash
+npm install --prefix motor
+```
+
+```bash
+npm start --prefix motor
+```
+
+Na primeira vez ele baixa o Chrome que o WhatsApp Web precisa (~200 MB) e demora um
+pouco. Quando o QR ficar pronto, abra **Conexão** no painel — ele aparece lá sozinho.
+No celular: WhatsApp → Aparelhos conectados → Conectar um aparelho.
+
+Depois de pareado, toda mensagem que chegar cai em **Conversas**. O motor precisa
+ficar aberto enquanto você quiser ser atendido; fechar a janela apaga a luz no painel.
+
+Nesta fase o motor **só escuta e registra**. Ele ainda não classifica nem responde —
+isso é a Fase 3.
 
 ## Publicar na Vercel
 
@@ -83,7 +112,15 @@ painel/         Next.js 16 + TypeScript + Tailwind v4
   components/   marca, ui, fila, painel, conta
   lib/          clientes do Supabase, ações de servidor, tipos
   proxy.ts      sessão e rotas protegidas (era middleware.ts até o Next 15)
-motor/          Node local — entra na Fase 2
+motor/          Node local
+  src/
+    index.js      liga tudo e desliga limpo no Ctrl+C
+    ambiente.js   lê e confere o .env
+    supabase.js   login na conta, com sessão guardada em arquivo
+    estado.js     espelha o estado do motor na tabela conexoes (batida de 30s)
+    whatsapp.js   cliente do WhatsApp, QR e eventos
+    fluxo.js      grava conversa e mensagem no banco
+  sessao/         credenciais do pareamento — gitignorado
 ```
 
 ## Identidade
