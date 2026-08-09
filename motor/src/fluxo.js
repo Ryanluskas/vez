@@ -17,7 +17,7 @@ export function criarFluxo(supabase, userId) {
   async function garantirConversa({ telefone, nome, ultimaMensagem }) {
     const { data: existente, error: erroDaBusca } = await supabase
       .from("conversas")
-      .select("id, nome, estagio")
+      .select("id, nome, estagio, atender")
       .eq("telefone", telefone)
       .maybeSingle();
 
@@ -34,7 +34,7 @@ export function criarFluxo(supabase, userId) {
           ultima_mensagem: ultimaMensagem,
           atualizado_em: new Date().toISOString(),
         })
-        .select("id, nome, estagio")
+        .select("id, nome, estagio, atender")
         .single();
 
       if (error) throw new Error(`criar conversa: ${error.message}`);
@@ -181,6 +181,17 @@ export function criarFluxo(supabase, userId) {
       Todo caminho de erro cai na fila. Nenhum caminho manda mensagem sozinho.
     */
     async processarRecebida(conversa, texto, nomeCliente) {
+      /*
+        Silenciada na mao pelo consultor: nao e cliente. A mensagem ja foi
+        gravada la em cima — o historico nunca se perde — mas o cerebro nao
+        roda. E o unico jeito honesto de separar cliente de mae, porque pro
+        WhatsApp os dois sao o mesmo tipo de contato.
+      */
+      if (conversa.atender === false) {
+        log.info(`${nomeCliente ?? "contato"} está silenciado. Só gravei.`);
+        return;
+      }
+
       // Conversa congelada esperando o consultor: nao mexe. O cliente pode
       // mandar mais dez mensagens; elas ficam gravadas e o bot fica quieto.
       if (conversa.estagio === "aguardando_voce") {

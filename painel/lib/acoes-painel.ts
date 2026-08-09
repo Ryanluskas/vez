@@ -145,6 +145,66 @@ export async function descartarRascunho(
 }
 
 /* ------------------------------------------------------------------
+   Conversas — dizer que aquele contato não é cliente
+------------------------------------------------------------------ */
+
+export async function alternarAtendimento(
+  _anterior: Resultado,
+  dados: FormData
+): Promise<Resultado> {
+  const id = texto(dados, "id");
+  const atenderAgora = texto(dados, "atender") === "true";
+
+  if (!id) return { erro: "Conversa não identificada." };
+
+  try {
+    await exigirLogin();
+  } catch (e) {
+    return { erro: (e as Error).message };
+  }
+
+  const supabase = await criarClienteServidor();
+
+  const { error } = await supabase
+    .from("conversas")
+    .update({ atender: atenderAgora })
+    .eq("id", id);
+
+  if (error) return { erro: `Não consegui salvar: ${error.message}` };
+
+  /*
+    Silenciar tem que limpar o que aquele contato já sujou, senão o botão
+    resolve o futuro e deixa o presente bagunçado — e a Fila só vale
+    alguma coisa se tudo que estiver nela for gente esperando dinheiro.
+
+    O histórico de mensagens fica: some só a fila e o rascunho.
+  */
+  if (!atenderAgora) {
+    await supabase
+      .from("pendencias")
+      .delete()
+      .eq("id_conversa", id)
+      .eq("status", "aberta");
+
+    await supabase
+      .from("rascunhos")
+      .update({ status: "descartado" })
+      .eq("id_conversa", id)
+      .eq("status", "pendente");
+
+    await supabase
+      .from("conversas")
+      .update({ estagio: "respondido" })
+      .eq("id", id);
+  }
+
+  revalidatePath("/conversas");
+  revalidatePath("/fila");
+  revalidatePath("/rascunhos");
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------
    Meu jeito — apagar um exemplo que o bot não deveria imitar
 ------------------------------------------------------------------ */
 

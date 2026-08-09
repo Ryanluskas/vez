@@ -14,6 +14,8 @@ export type Conversa = {
   estagio: EstagioDaConversa;
   ultima_mensagem: string | null;
   atualizado_em: string;
+  /* false = contato silenciado: o bot grava as mensagens mas não pensa. */
+  atender: boolean;
 };
 
 export type Mensagem = {

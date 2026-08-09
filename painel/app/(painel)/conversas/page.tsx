@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { CabecalhoDeTela, Tela, Vazio } from "@/components/ui/Tela";
+import { BotaoAtender } from "@/components/conversas/BotaoAtender";
 import { criarClienteServidor } from "@/lib/supabase/servidor";
 import { ROTULO_DO_ESTAGIO, type Conversa, type EstagioDaConversa } from "@/lib/tipos";
 import { cn } from "@/lib/cn";
@@ -13,6 +14,7 @@ const FILTROS: Array<{ chave: string; nome: string }> = [
   { chave: "rascunho_pronto", nome: "Rascunho pronto" },
   { chave: "aguardando_bot", nome: "Bot atendendo" },
   { chave: "respondido", nome: "Respondidas" },
+  { chave: "silenciadas", nome: "Silenciadas" },
 ];
 
 export default async function PaginaDeConversas({
@@ -27,20 +29,39 @@ export default async function PaginaDeConversas({
 
   let consulta = supabase
     .from("conversas")
-    .select("id, telefone, nome, estagio, ultima_mensagem, atualizado_em")
+    .select("id, telefone, nome, estagio, ultima_mensagem, atualizado_em, atender")
     .order("atualizado_em", { ascending: false })
     .limit(100);
 
-  if (filtro !== "todas") consulta = consulta.eq("estagio", filtro);
+  if (filtro === "silenciadas") consulta = consulta.eq("atender", false);
+  else if (filtro !== "todas") consulta = consulta.eq("estagio", filtro);
 
-  const { data } = await consulta.returns<Conversa[]>();
+  const { data, error } = await consulta.returns<Conversa[]>();
   const conversas = data ?? [];
+
+  // A coluna `atender` nasce no 05_atender.sql.
+  if (error) {
+    return (
+      <Tela>
+        <CabecalhoDeTela
+          titulo="Conversas"
+          linha="Falta uma parte do banco para esta tela funcionar."
+        />
+        <div className="rounded-lg border border-fio bg-sup p-5">
+          <p className="text-[13px] leading-relaxed text-texto2">
+            Rode <code className="num text-texto">banco/05_atender.sql</code> no SQL
+            Editor do Supabase e recarregue.
+          </p>
+        </div>
+      </Tela>
+    );
+  }
 
   return (
     <Tela>
       <CabecalhoDeTela
         titulo="Conversas"
-        linha="Todo mundo que o bot atendeu, em que pé está cada um."
+        linha="Todo mundo que escreveu pra você. Quem não é cliente, você silencia num clique."
       />
 
       <div className="mb-2 flex gap-1 overflow-x-auto pb-1">
@@ -76,18 +97,29 @@ export default async function PaginaDeConversas({
           {conversas.map((c) => (
             <article
               key={c.id}
-              className="flex items-start justify-between gap-4 border-t border-fio py-3"
+              className="group flex items-start justify-between gap-4 border-t border-fio py-3"
             >
-              <div className="min-w-0">
+              <div className={cn("min-w-0", !c.atender && "opacity-50")}>
                 <div className="flex flex-wrap items-center gap-x-3">
                   <span className="text-[14px] text-texto">{c.nome ?? "Sem nome"}</span>
                   <span className="num text-[12px] text-texto3">{c.telefone}</span>
+                  {!c.atender ? (
+                    <span className="text-[11px] text-texto3">silenciado</span>
+                  ) : null}
                 </div>
                 <p className="mt-1 truncate text-[13px] text-texto2">
                   {c.ultima_mensagem ?? "—"}
                 </p>
               </div>
-              <Etiqueta estagio={c.estagio} />
+
+              <div className="flex shrink-0 items-center gap-3">
+                {c.atender ? <Etiqueta estagio={c.estagio} /> : null}
+                <BotaoAtender
+                  id={c.id}
+                  atendendo={c.atender}
+                  nome={c.nome ?? c.telefone}
+                />
+              </div>
             </article>
           ))}
         </div>
