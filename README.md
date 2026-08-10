@@ -39,7 +39,20 @@ API de IA paga.
 - [ ] **Fase 6** — polimento
 - [ ] **Fase 7** — empacotar o motor num instalador Windows
 
-## Rodar o painel
+## Usar no dia a dia
+
+Dê dois cliques no atalho **Vez** na Área de Trabalho. Ele compila o painel se
+precisar, sobe painel e motor, e abre o navegador. A janela preta que fica aberta é o
+motor: é nela que aparece o QR e o log de quem está sendo atendido. Fechar a janela
+para tudo.
+
+Se o atalho sumir, recrie com `ferramentas\criar-atalho.bat`.
+
+Rodando pelo atalho o painel roda **compilado**, não em modo desenvolvimento — sobe em
+menos de um segundo em vez de vários. Depois de mexer no código do painel, apague
+`painel\.next` para ele recompilar no próximo uso.
+
+## Rodar o painel na mão
 
 **1. Criar o projeto no Supabase.** Em [supabase.com](https://supabase.com), plano
 gratuito. Em *Project Settings → API Keys*, copie a **Project URL** e a chave
