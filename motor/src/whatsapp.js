@@ -95,8 +95,33 @@ export function criarWhatsApp({ conexao, estado, fluxo }) {
     }),
     puppeteer: {
       headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        /*
+          Sem isto o Chromium usa /dev/shm, que e pequeno, e a aba morre no
+          meio do carregamento do WhatsApp Web — que e exatamente o
+          "Execution context was destroyed" que aparece no painel.
+        */
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--no-first-run",
+        "--no-default-browser-check",
+      ],
     },
+    /*
+      Escape hatch: quando o WhatsApp Web muda e quebra a lib, da pra
+      prender numa versao conhecida sem esperar release.
+      WA_VERSAO_HTML=https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.xxxxx.html
+    */
+    ...(process.env.WA_VERSAO_HTML
+      ? {
+          webVersionCache: {
+            type: "remote",
+            remotePath: process.env.WA_VERSAO_HTML,
+          },
+        }
+      : {}),
   });
 
   cliente.on("qr", async (codigo) => {

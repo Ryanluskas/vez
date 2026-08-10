@@ -1,5 +1,9 @@
+import fs from "node:fs";
+import path from "node:path";
+import { RAIZ } from "./ambiente.js";
 import { criarEstado } from "./estado.js";
 import { criarWhatsApp, pedirNovoPareamento } from "./whatsapp.js";
+import { matarChromiumsOrfaos } from "./limpeza.js";
 import { log } from "./log.js";
 
 /*
@@ -57,9 +61,20 @@ export function criarMaestro({ supabase, fluxo, userId }) {
     return data ?? [];
   }
 
-  async function ligar(conexao) {
+  /*
+    Abrir o WhatsApp Web falha de vez em quando com "Execution context was
+    destroyed": a pagina recarrega no meio da inicializacao e o puppeteer
+    perde o contexto. Quase sempre a segunda tentativa pega. Na ultima, a
+    sessao e apagada — se o que estava gravado e que esta ruim, comecar do
+    QR resolve.
+  */
+  const TENTATIVAS = 3;
+
+  async function ligar(conexao, tentativa = 1) {
     const apelido = conexao.apelido ?? "Principal";
-    log.info(`[${apelido}] abrindo o WhatsApp…`);
+    log.info(
+      `[${apelido}] abrindo o WhatsApp…${tentativa > 1 ? ` (tentativa ${tentativa})` : ""}`
+    );
 
     const estado = criarEstado(supabase, conexao.id, apelido);
     await estado.anotar({ estado: "iniciando", detalhe: "Abrindo o WhatsApp." });
@@ -71,9 +86,60 @@ export function criarMaestro({ supabase, fluxo, userId }) {
     // initialize() demora e pode falhar; nao pode travar os outros numeros.
     cliente.initialize().catch(async (erro) => {
       log.erro(`[${apelido}] não abriu: ${erro.message}`);
-      await estado.desligar(`Não consegui abrir o WhatsApp: ${erro.message}`);
       ligados.delete(conexao.id);
+
+      try {
+        await cliente.destroy();
+      } catch {
+        // Navegador ja morto: nada a fechar.
+      }
+
+      if (tentativa >= TENTATIVAS) {
+        await estado.desligar(
+          `Não consegui abrir o WhatsApp depois de ${TENTATIVAS} tentativas: ${erro.message}`
+        );
+        return;
+      }
+
+      // Na ultima tentativa, comeca do zero.
+      if (tentativa === TENTATIVAS - 1) {
+        pedirNovoPareamento(conexao.id);
+        log.alerta(`[${apelido}] vou apagar a sessão e pedir o QR de novo.`);
+      }
+
+      await estado.anotar({
+        estado: "iniciando",
+        detalhe: `Tentando abrir de novo (${tentativa + 1} de ${TENTATIVAS})…`,
+      });
+
+      setTimeout(() => {
+        ligar(conexao, tentativa + 1).catch((e) =>
+          log.erro(`[${apelido}] ${e.message}`)
+        );
+      }, 5000);
     });
+  }
+
+  /*
+    Conexao apagada no painel deixa pra tras um perfil inteiro de Chromium
+    (dezenas de MB). Sem esta limpeza, a pasta sessao/ so cresce.
+  */
+  function varrerSessoesOrfas(idsQueExistem) {
+    const raizDasSessoes = path.join(RAIZ, "sessao", "whatsapp");
+    if (!fs.existsSync(raizDasSessoes)) return;
+
+    for (const nome of fs.readdirSync(raizDasSessoes)) {
+      // "session-vez" e do formato antigo, de quando so havia um numero.
+      const ehOrfa = nome === "session-vez" || !idsQueExistem.has(nome);
+      if (!ehOrfa) continue;
+
+      try {
+        fs.rmSync(path.join(raizDasSessoes, nome), { recursive: true, force: true });
+        log.info(`Limpei uma sessão que não pertence mais a nenhum número.`);
+      } catch {
+        // Em uso por um Chromium que ainda nao morreu: tenta na proxima volta.
+      }
+    }
   }
 
   async function desligar(id, detalhe) {
@@ -146,10 +212,16 @@ export function criarMaestro({ supabase, fluxo, userId }) {
     for (const id of [...ligados.keys()]) {
       if (!idsQueExistem.has(id)) await desligar(id, null);
     }
+
+    varrerSessoesOrfas(idsQueExistem);
   }
 
   return {
     async ligar() {
+      // Antes de abrir qualquer coisa: tira do caminho os Chromium que
+      // sobraram da ultima vez e ainda seguram o lock das sessoes.
+      await matarChromiumsOrfaos();
+
       await garantirPrimeiraConexao();
       await reconferir();
 
