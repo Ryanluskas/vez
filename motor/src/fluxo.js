@@ -18,7 +18,7 @@ export function criarFluxo(supabase, userId) {
   async function garantirConversa({ telefone, nome, ultimaMensagem }) {
     const { data: existente, error: erroDaBusca } = await supabase
       .from("conversas")
-      .select("id, nome, estagio, atender")
+      .select("id, nome, estagio, atender, etapa, seguir")
       .eq("telefone", telefone)
       .maybeSingle();
 
@@ -35,7 +35,7 @@ export function criarFluxo(supabase, userId) {
           ultima_mensagem: ultimaMensagem,
           atualizado_em: new Date().toISOString(),
         })
-        .select("id, nome, estagio, atender")
+        .select("id, nome, estagio, atender, etapa, seguir")
         .single();
 
       if (error) throw new Error(`criar conversa: ${error.message}`);
@@ -176,7 +176,51 @@ export function criarFluxo(supabase, userId) {
       });
 
       if (error) throw new Error(`salvar mensagem: ${error.message}`);
+
+      /*
+        Cliente falou: o relogio do follow-up zera e as cobrancas anteriores
+        sao perdoadas. Quem respondeu nao esta sumido, mesmo que tenha
+        demorado tres dias.
+      */
+      if (direcao === "recebida") {
+        const mudanca = {
+          ultima_recebida_em: new Date().toISOString(),
+          followups_enviados: 0,
+        };
+        if (conversa.etapa === "novo") mudanca.etapa = "conversando";
+
+        await supabase.from("conversas").update(mudanca).eq("id", conversa.id);
+        Object.assign(conversa, mudanca);
+      }
+
       return conversa;
+    },
+
+    /*
+      Chegou arquivo. Nao classifica: foto de contracheque nao tem texto pra
+      classificar, e o que importa aqui e avisar o consultor de que a bola
+      voltou pra ele.
+    */
+    async marcarDocumentoRecebido(conversa) {
+      await supabase
+        .from("conversas")
+        .update({
+          etapa: "documentos_recebidos",
+          followups_enviados: 0,
+          atualizado_em: new Date().toISOString(),
+        })
+        .eq("id", conversa.id);
+
+      conversa.etapa = "documentos_recebidos";
+    },
+
+    /* O bot mandou a lista de documentos: agora a bola esta com o cliente. */
+    async marcarEsperandoDocumentos(idConversa) {
+      await supabase
+        .from("conversas")
+        .update({ etapa: "aguardando_documentos", followups_enviados: 0 })
+        .eq("id", idConversa)
+        .in("etapa", ["novo", "conversando"]);
     },
 
     /*

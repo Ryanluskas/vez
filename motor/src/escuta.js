@@ -116,6 +116,16 @@ export function criarEscuta({ supabase, fluxo, whatsapp, userId }) {
 
     log.destaque(`✓ Enviado para ${conversa.nome ?? conversa.telefone}`);
 
+    /*
+      Acabamos de mandar a lista de documentos: a bola passa pro cliente e o
+      relogio do follow-up comeca a correr. E o unico jeito automatico de
+      saber que a conversa entrou nessa etapa.
+    */
+    if (rascunho.categoria === "documentos") {
+      await fluxo.marcarEsperandoDocumentos(conversa.id);
+      log.info(`${conversa.nome ?? conversa.telefone} agora está esperando documentos.`);
+    }
+
     // Fase 5: so vira exemplo o que realmente saiu. Rascunho descartado
     // nao ensina nada, e rascunho aprovado que falhou no envio tambem nao.
     await guardarExemplo(rascunho, conversa);

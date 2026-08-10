@@ -7,7 +7,13 @@ pergunta envolve **valor, quanto libera, parcela, simulação ou saldo**, ele n�
 congela aquela conversa, coloca a pergunta numa **fila em ordem de chegada** e segue
 atendendo os outros clientes. O consultor responde no painel e a conversa volta a fluir.
 
-Nesta versão **nada é enviado sozinho** — todo envio passa pela aprovação do consultor.
+**Nada é enviado sozinho — com uma exceção.** Toda resposta a cliente passa pela sua
+aprovação em Rascunhos. A única mensagem que sai sem passar por você é o **follow-up**:
+o lembrete que o bot manda pra quem sumiu ("conseguiu separar os documentos?").
+
+Essa exceção é deliberada. Follow-up não tem número, o texto é fixo e escrito à mão —
+não passa pela IA — e um lembrete que espera aprovação vira mais uma tarefa na pilha,
+ou seja, não acontece. Dá pra desligar por conversa em Conversas.
 
 ## As duas peças
 
@@ -52,6 +58,8 @@ quebrar nada. Separados, na ordem:
 - `banco/02_rls.sql`
 - `banco/03_conexoes.sql`
 - `banco/04_fase3.sql`
+- `banco/05_atender.sql`
+- `banco/06_funil.sql`
 
 O `02` é o que isola os dados de cada consultor. A consulta no fim dele confere: as
 cinco tabelas têm que aparecer com `rls_ligado = true` e 4 políticas cada.
@@ -133,6 +141,37 @@ em que a IA desligue essa trava. Há teste para isso:
 ```bash
 npm test --prefix motor
 ```
+
+## O funil
+
+Cada conversa tem duas coisas que não se misturam:
+
+- **estágio** — onde a *mensagem* está: bot atendendo, travada com você, rascunho pronto
+- **etapa** — onde o *cliente* está na venda: novo → conversando → esperando documentos
+  → documentos recebidos → em análise → fechado ou perdido
+
+Um cliente pode estar "esperando documentos" e "travado com você" ao mesmo tempo,
+porque perguntou o valor enquanto separava os papéis.
+
+**Quando o cliente manda arquivo** (foto ou PDF), o motor não classifica — reconhece
+como documentação, move a etapa e te manda uma mensagem no seu próprio WhatsApp:
+`📄 Josenete mandou documento.` Você vive no WhatsApp, não no painel.
+
+**Quando o cliente some**, o bot cobra sozinho:
+
+| tentativa | conversando | esperando documentos |
+| --- | --- | --- |
+| 1ª | 4 horas | 6 horas |
+| 2ª | 1 dia | 1 dia |
+| 3ª | 3 dias | 3 dias |
+
+Depois da terceira ele para e marca a conversa como perdida. A terceira mensagem já
+se despede em vez de insistir — quem não respondeu três vezes quer ser deixado em paz
+com a porta aberta.
+
+Nunca antes das 8h nem depois das 20h, nunca em conversa silenciada, e **nunca em
+quem está esperando você responder** — cobrar alguém que aguarda um número seu é o
+pior tipo de follow-up que existe.
 
 ## O ciclo completo
 

@@ -2,6 +2,7 @@ import path from "node:path";
 import wweb from "whatsapp-web.js";
 import QRCode from "qrcode";
 import { RAIZ } from "./ambiente.js";
+import { avisoDeDocumento } from "./funil.js";
 import { log } from "./log.js";
 
 const { Client, LocalAuth } = wweb;
@@ -31,6 +32,23 @@ function textoDaMensagem(msg) {
 /* Só conversa de pessoa: grupo, status e lista de transmissão ficam de fora. */
 function ehConversaDeCliente(idDoChat) {
   return typeof idDoChat === "string" && idDoChat.endsWith("@c.us");
+}
+
+/* O que conta como "mandou documento". Áudio e figurinha não contam. */
+const ARQUIVOS = new Set(["document", "image"]);
+
+/*
+  Manda o aviso pro WhatsApp do próprio consultor — a conversa que ele tem
+  consigo mesmo. É notificação que chega no bolso dele, sem depender de ele
+  estar com o painel aberto.
+*/
+async function avisarConsultor(cliente, texto) {
+  try {
+    const eu = cliente.info?.wid?._serialized;
+    if (eu) await cliente.sendMessage(eu, texto);
+  } catch (erro) {
+    log.erro(`não consegui te avisar no WhatsApp: ${erro.message}`);
+  }
 }
 
 export function criarWhatsApp({ estado, fluxo }) {
@@ -138,9 +156,21 @@ export function criarWhatsApp({ estado, fluxo }) {
         proprio celular fica gravado (vira material de estilo na Fase 5), mas
         nao dispara classificacao — senao o bot responderia a si mesmo.
       */
-      if (!msg.fromMe) {
-        await fluxo.processarRecebida(conversa, texto, nome);
+      if (msg.fromMe) return;
+
+      /*
+        Arquivo do cliente = documentação chegando. Isso nao vai pro
+        classificador: foto de contracheque nao tem texto. Vai direto pro
+        consultor, no WhatsApp dele, porque e la que ele vive.
+      */
+      if (msg.hasMedia && ARQUIVOS.has(msg.type) && conversa.atender !== false) {
+        await fluxo.marcarDocumentoRecebido(conversa);
+        await avisarConsultor(cliente, avisoDeDocumento(conversa));
+        log.destaque(`📄 ${nome ?? telefone} mandou documento.`);
+        return;
       }
+
+      await fluxo.processarRecebida(conversa, texto, nome);
     } catch (erro) {
       // Uma mensagem que falha nao pode derrubar o atendimento das outras.
       log.erro("Não consegui registrar uma mensagem:", erro.message);

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { criarClienteServidor, usuarioAtual } from "@/lib/supabase/servidor";
+import { ETAPAS, type Etapa } from "@/lib/tipos";
 
 export type Resultado = { erro?: string; ok?: boolean };
 
@@ -201,6 +202,71 @@ export async function alternarAtendimento(
   revalidatePath("/conversas");
   revalidatePath("/fila");
   revalidatePath("/rascunhos");
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------
+   Conversas — mover no funil e ligar/desligar a cobrança
+------------------------------------------------------------------ */
+
+export async function mudarEtapa(
+  _anterior: Resultado,
+  dados: FormData
+): Promise<Resultado> {
+  const id = texto(dados, "id");
+  const etapa = texto(dados, "etapa") as Etapa;
+
+  if (!id) return { erro: "Conversa não identificada." };
+  if (!ETAPAS.includes(etapa)) return { erro: "Etapa desconhecida." };
+
+  try {
+    await exigirLogin();
+  } catch (e) {
+    return { erro: (e as Error).message };
+  }
+
+  const supabase = await criarClienteServidor();
+
+  /*
+    Mover no funil zera o contador de cobranças: se você acabou de mudar a
+    etapa na mão, é porque a conversa andou — e cobrar alguém que acabou de
+    andar é o jeito mais fácil de irritar cliente.
+  */
+  const { error } = await supabase
+    .from("conversas")
+    .update({ etapa, followups_enviados: 0 })
+    .eq("id", id);
+
+  if (error) return { erro: `Não consegui salvar: ${error.message}` };
+
+  revalidatePath("/conversas");
+  return { ok: true };
+}
+
+export async function alternarSeguimento(
+  _anterior: Resultado,
+  dados: FormData
+): Promise<Resultado> {
+  const id = texto(dados, "id");
+  const seguirAgora = texto(dados, "seguir") === "true";
+
+  if (!id) return { erro: "Conversa não identificada." };
+
+  try {
+    await exigirLogin();
+  } catch (e) {
+    return { erro: (e as Error).message };
+  }
+
+  const supabase = await criarClienteServidor();
+  const { error } = await supabase
+    .from("conversas")
+    .update({ seguir: seguirAgora })
+    .eq("id", id);
+
+  if (error) return { erro: `Não consegui salvar: ${error.message}` };
+
+  revalidatePath("/conversas");
   return { ok: true };
 }
 

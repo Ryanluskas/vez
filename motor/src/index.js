@@ -3,6 +3,7 @@ import { criarClienteDoMotor, entrarNaConta } from "./supabase.js";
 import { criarEstado } from "./estado.js";
 import { criarFluxo } from "./fluxo.js";
 import { criarEscuta } from "./escuta.js";
+import { criarSeguimento } from "./seguimento.js";
 import { criarWhatsApp } from "./whatsapp.js";
 import {
   ollamaVivo,
@@ -70,8 +71,10 @@ async function principal() {
   // A escuta do painel so entra em cena quando o WhatsApp esta pronto:
   // ela pode precisar enviar mensagem a qualquer momento.
   let desligarEscuta = null;
+  let desligarSeguimento = null;
   whatsapp.on("ready", () => {
     if (desligarEscuta) return;
+
     const escuta = criarEscuta({
       supabase,
       fluxo,
@@ -80,6 +83,10 @@ async function principal() {
     });
     desligarEscuta = escuta.ligar();
     log.info("De olho no painel: respostas da fila e rascunhos aprovados.");
+
+    const seguimento = criarSeguimento({ supabase, whatsapp, userId: usuario.id });
+    desligarSeguimento = seguimento.ligar();
+    log.info("Follow-up ligado: cobra quem sumiu, das 8h às 20h, no máximo 3 vezes.");
   });
 
   // Fechar o programa tem que apagar a luz no painel, senao ele mente.
@@ -89,6 +96,7 @@ async function principal() {
     saindo = true;
     log.info(`Encerrando (${sinal})…`);
     desligarEscuta?.();
+    desligarSeguimento?.();
     await estado.desligar("O motor foi fechado nesta máquina.");
     try {
       await whatsapp.destroy();

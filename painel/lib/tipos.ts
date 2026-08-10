@@ -16,6 +16,45 @@ export type Conversa = {
   atualizado_em: string;
   /* false = contato silenciado: o bot grava as mensagens mas não pensa. */
   atender: boolean;
+  /* Onde o cliente está na venda — independente do estágio da mensagem. */
+  etapa: Etapa;
+  /* false = nunca mandar follow-up nesta conversa. */
+  seguir: boolean;
+  followups_enviados: number;
+};
+
+/*
+  Funil de venda. Não confundir com `estagio`, que é o processamento da
+  mensagem: um cliente pode estar "esperando documentos" (etapa) e ao mesmo
+  tempo "travado com você" (estágio) porque perguntou o valor no meio.
+*/
+export type Etapa =
+  | "novo"
+  | "conversando"
+  | "aguardando_documentos"
+  | "documentos_recebidos"
+  | "em_analise"
+  | "fechado"
+  | "perdido";
+
+export const ETAPAS: Etapa[] = [
+  "novo",
+  "conversando",
+  "aguardando_documentos",
+  "documentos_recebidos",
+  "em_analise",
+  "fechado",
+  "perdido",
+];
+
+export const ROTULO_DA_ETAPA: Record<Etapa, string> = {
+  novo: "Novo",
+  conversando: "Conversando",
+  aguardando_documentos: "Esperando documentos",
+  documentos_recebidos: "Documentos recebidos",
+  em_analise: "Em análise",
+  fechado: "Fechado",
+  perdido: "Perdido",
 };
 
 export type Mensagem = {
