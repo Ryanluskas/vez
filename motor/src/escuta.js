@@ -13,7 +13,7 @@ import { log } from "./log.js";
 
 const VARREDURA_MS = 15_000;
 
-export function criarEscuta({ supabase, fluxo, whatsapp, userId }) {
+export function criarEscuta({ supabase, fluxo, maestro, userId }) {
   // Ids em processamento agora. Sem isso, o realtime e a varredura podem
   // pegar a mesma linha ao mesmo tempo e a cliente recebe a mensagem duas vezes.
   const naMao = new Set();
@@ -79,11 +79,25 @@ export function criarEscuta({ supabase, fluxo, whatsapp, userId }) {
   async function enviar(rascunho) {
     const { data: conversa } = await supabase
       .from("conversas")
-      .select("id, telefone, nome")
+      .select("id, telefone, nome, id_conexao")
       .eq("id", rascunho.id_conversa)
       .single();
 
     if (!conversa) throw new Error("rascunho aprovado sem conversa; pulei");
+
+    /*
+      A resposta tem que sair pelo MESMO numero por onde o cliente escreveu.
+      Sair por outro faz o cliente receber mensagem de um desconhecido no
+      meio da conversa — e o consultor nem fica sabendo.
+    */
+    const whatsapp =
+      maestro.clientePara(conversa.id_conexao) ?? maestro.qualquerCliente();
+
+    if (!whatsapp) {
+      throw new Error(
+        `nenhum número conectado pra responder ${conversa.nome ?? conversa.telefone}; tento de novo depois`
+      );
+    }
 
     const destino = `${conversa.telefone}@c.us`;
 

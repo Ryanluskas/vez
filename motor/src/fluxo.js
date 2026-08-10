@@ -15,11 +15,17 @@ export function criarFluxo(supabase, userId) {
      Conversa
   ------------------------------------------------------------------ */
 
-  async function garantirConversa({ telefone, nome, ultimaMensagem }) {
+  /*
+    A conversa e identificada por (numero do consultor, telefone do cliente).
+    O mesmo cliente escrevendo pro seu numero comercial e pro seu numero
+    antigo sao duas conversas — historicos diferentes, etapas diferentes.
+  */
+  async function garantirConversa({ idConexao, telefone, nome, ultimaMensagem }) {
     const { data: existente, error: erroDaBusca } = await supabase
       .from("conversas")
       .select("id, nome, estagio, atender, etapa, seguir")
       .eq("telefone", telefone)
+      .eq("id_conexao", idConexao)
       .maybeSingle();
 
     if (erroDaBusca) throw new Error(`buscar conversa: ${erroDaBusca.message}`);
@@ -29,6 +35,7 @@ export function criarFluxo(supabase, userId) {
         .from("conversas")
         .insert({
           user_id: userId,
+          id_conexao: idConexao,
           telefone,
           nome: nome ?? null,
           estagio: "aguardando_bot",
@@ -161,8 +168,9 @@ export function criarFluxo(supabase, userId) {
 
   return {
     /* Grava a mensagem crua. Vale pros dois lados da conversa. */
-    async registrar({ telefone, nome, texto, direcao }) {
+    async registrar({ idConexao, telefone, nome, texto, direcao }) {
       const conversa = await garantirConversa({
+        idConexao,
         telefone,
         nome,
         ultimaMensagem: texto,

@@ -271,6 +271,120 @@ export async function alternarSeguimento(
 }
 
 /* ------------------------------------------------------------------
+   Conexão — vários números de WhatsApp
+
+   O painel roda na Vercel e não alcança a máquina do consultor. Toda ordem
+   daqui é uma bandeira no banco; o motor vem buscar a cada 30 segundos.
+------------------------------------------------------------------ */
+
+export async function criarConexao(
+  _anterior: Resultado,
+  dados: FormData
+): Promise<Resultado> {
+  const apelido = texto(dados, "apelido").slice(0, 40);
+  if (!apelido) return { erro: "Dê um apelido pro número. Ex: Comercial." };
+
+  let usuario;
+  try {
+    usuario = await exigirLogin();
+  } catch (e) {
+    return { erro: (e as Error).message };
+  }
+
+  const supabase = await criarClienteServidor();
+  const { error } = await supabase
+    .from("conexoes")
+    .insert({ user_id: usuario.id, apelido, estado: "desligado" });
+
+  if (error) {
+    return {
+      erro: error.code === "23505" ? "Já existe um número com esse apelido." : error.message,
+    };
+  }
+
+  revalidatePath("/conexao");
+  return { ok: true };
+}
+
+export async function pedirDesconexao(
+  _anterior: Resultado,
+  dados: FormData
+): Promise<Resultado> {
+  const id = texto(dados, "id");
+  if (!id) return { erro: "Número não identificado." };
+
+  try {
+    await exigirLogin();
+  } catch (e) {
+    return { erro: (e as Error).message };
+  }
+
+  const supabase = await criarClienteServidor();
+
+  /*
+    Levanta a bandeira. Quem desconecta de verdade é o motor: ele chama
+    logout() no WhatsApp, o que remove o aparelho do celular também, apaga
+    a sessão e volta a pedir QR.
+  */
+  const { error } = await supabase
+    .from("conexoes")
+    .update({ desconectar_pedido: true })
+    .eq("id", id);
+
+  if (error) return { erro: `Não consegui pedir: ${error.message}` };
+
+  revalidatePath("/conexao");
+  return { ok: true };
+}
+
+export async function alternarConexaoAtiva(
+  _anterior: Resultado,
+  dados: FormData
+): Promise<Resultado> {
+  const id = texto(dados, "id");
+  const ativa = texto(dados, "ativa") === "true";
+  if (!id) return { erro: "Número não identificado." };
+
+  try {
+    await exigirLogin();
+  } catch (e) {
+    return { erro: (e as Error).message };
+  }
+
+  const supabase = await criarClienteServidor();
+  const { error } = await supabase.from("conexoes").update({ ativa }).eq("id", id);
+
+  if (error) return { erro: `Não consegui salvar: ${error.message}` };
+
+  revalidatePath("/conexao");
+  return { ok: true };
+}
+
+export async function apagarConexao(
+  _anterior: Resultado,
+  dados: FormData
+): Promise<Resultado> {
+  const id = texto(dados, "id");
+  if (!id) return { erro: "Número não identificado." };
+
+  try {
+    await exigirLogin();
+  } catch (e) {
+    return { erro: (e as Error).message };
+  }
+
+  const supabase = await criarClienteServidor();
+
+  // As conversas ficam: o histórico daquele número não some junto.
+  const { error } = await supabase.from("conexoes").delete().eq("id", id);
+  if (error) return { erro: `Não consegui apagar: ${error.message}` };
+
+  revalidatePath("/conexao");
+  revalidatePath("/conversas");
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------
    Meu jeito — apagar um exemplo que o bot não deveria imitar
 ------------------------------------------------------------------ */
 

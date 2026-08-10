@@ -16,7 +16,7 @@ import { log } from "./log.js";
 
 const VARREDURA_MS = 10 * 60 * 1000; // 10 minutos
 
-export function criarSeguimento({ supabase, whatsapp, userId }) {
+export function criarSeguimento({ supabase, maestro, userId }) {
   async function varrer() {
     // Fora do horário nem consulta o banco.
     if (!horarioDecente()) return;
@@ -24,7 +24,7 @@ export function criarSeguimento({ supabase, whatsapp, userId }) {
     const { data, error } = await supabase
       .from("conversas")
       .select(
-        "id, telefone, nome, etapa, estagio, atender, seguir, followups_enviados, ultimo_followup_em, ultima_recebida_em"
+        "id, telefone, nome, etapa, estagio, atender, seguir, followups_enviados, ultimo_followup_em, ultima_recebida_em, id_conexao"
       )
       .eq("atender", true)
       .eq("seguir", true)
@@ -41,6 +41,10 @@ export function criarSeguimento({ supabase, whatsapp, userId }) {
     for (const conversa of data ?? []) {
       const decisao = decidirFollowup(conversa);
       if (!decisao.seguir) continue;
+
+      // A cobranca sai pelo mesmo numero da conversa, nunca por outro.
+      const whatsapp = maestro.clientePara(conversa.id_conexao);
+      if (!whatsapp) continue;
 
       try {
         await whatsapp.sendMessage(`${conversa.telefone}@c.us`, decisao.texto);

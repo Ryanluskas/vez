@@ -39,6 +39,10 @@ export async function resumoDoPainel(): Promise<ResumoDoPainel> {
 export type EstadoDoMotor = "desligado" | "iniciando" | "aguardando_qr" | "conectado";
 
 export type Conexao = {
+  id: string;
+  apelido: string;
+  ativa: boolean;
+  desconectando: boolean;
   estado: EstadoDoMotor;
   ligado: boolean;
   qr: string | null;
@@ -46,50 +50,53 @@ export type Conexao = {
   aparelho: string | null;
   detalhe: string | null;
   vistoEm: string | null;
-  tabelaPronta: boolean;
 };
 
 /* O motor bate o coracao a cada 30s. Passou disso, tratamos como desligado. */
 const TOLERANCIA_MS = 90_000;
-
-const DESLIGADO: Conexao = {
-  estado: "desligado",
-  ligado: false,
-  qr: null,
-  telefone: null,
-  aparelho: null,
-  detalhe: null,
-  vistoEm: null,
-  tabelaPronta: true,
-};
 
 /*
   O painel roda na Vercel e nao consegue perguntar nada pra maquina do
   consultor. Tudo que ele sabe vem da tabela `conexoes` e da ultima batida.
   Se as batidas pararam, o painel diz "desligado" — nunca chuta que esta no ar.
 */
-export async function estadoDaConexao(): Promise<Conexao> {
+export async function conexoesDoUsuario(): Promise<{
+  conexoes: Conexao[];
+  tabelaPronta: boolean;
+}> {
   const supabase = await criarClienteServidor();
 
   const { data, error } = await supabase
     .from("conexoes")
-    .select("estado, qr, telefone, aparelho, detalhe, visto_em")
-    .maybeSingle();
+    .select("id, apelido, ativa, desconectar_pedido, estado, qr, telefone, aparelho, detalhe, visto_em")
+    .order("apelido");
 
-  if (error) return { ...DESLIGADO, tabelaPronta: false };
-  if (!data) return DESLIGADO;
+  if (error) return { conexoes: [], tabelaPronta: false };
 
-  const recente = Date.now() - new Date(data.visto_em).getTime() < TOLERANCIA_MS;
-  const estado = (recente ? data.estado : "desligado") as EstadoDoMotor;
+  const conexoes = (data ?? []).map((linha) => {
+    const recente = Date.now() - new Date(linha.visto_em).getTime() < TOLERANCIA_MS;
+    const estado = (recente ? linha.estado : "desligado") as EstadoDoMotor;
 
-  return {
-    estado,
-    ligado: recente && data.estado === "conectado",
-    qr: recente && estado === "aguardando_qr" ? data.qr : null,
-    telefone: data.telefone,
-    aparelho: data.aparelho,
-    detalhe: recente ? data.detalhe : "O motor parou de responder nesta máquina.",
-    vistoEm: data.visto_em,
-    tabelaPronta: true,
-  };
+    return {
+      id: linha.id,
+      apelido: linha.apelido,
+      ativa: linha.ativa,
+      desconectando: linha.desconectar_pedido,
+      estado,
+      ligado: recente && linha.estado === "conectado",
+      qr: recente && estado === "aguardando_qr" ? linha.qr : null,
+      telefone: linha.telefone,
+      aparelho: linha.aparelho,
+      detalhe: recente ? linha.detalhe : "O motor parou de responder nesta máquina.",
+      vistoEm: linha.visto_em,
+    };
+  });
+
+  return { conexoes, tabelaPronta: true };
+}
+
+/* Pro topo do painel: basta um número no ar pra luz acender. */
+export async function algumMotorLigado(): Promise<boolean> {
+  const { conexoes } = await conexoesDoUsuario();
+  return conexoes.some((c) => c.ligado);
 }

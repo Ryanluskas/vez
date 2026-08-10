@@ -1,10 +1,9 @@
 import { lerAmbiente } from "./ambiente.js";
 import { criarClienteDoMotor, entrarNaConta } from "./supabase.js";
-import { criarEstado } from "./estado.js";
 import { criarFluxo } from "./fluxo.js";
+import { criarMaestro } from "./conexoes.js";
 import { criarEscuta } from "./escuta.js";
 import { criarSeguimento } from "./seguimento.js";
-import { criarWhatsApp } from "./whatsapp.js";
 import {
   ollamaVivo,
   modeloDisponivel,
@@ -43,8 +42,11 @@ async function conferirIa() {
   // Enquanto o WhatsApp ainda nem abriu, ninguem esta esperando resposta.
   // E a hora certa de pagar o custo de carregar o modelo.
   const segundos = await aquecer();
-  if (segundos === null) log.alerta("Não consegui aquecer o modelo; a primeira resposta vai demorar.");
-  else log.info(`Modelo quente em ${segundos}s. Fica na memória por 30 minutos.`);
+  if (segundos === null) {
+    log.alerta("Não consegui aquecer o modelo; a primeira resposta vai demorar.");
+  } else {
+    log.info(`Modelo quente em ${segundos}s. Fica na memória por 30 minutos.`);
+  }
 
   return true;
 }
@@ -60,34 +62,22 @@ async function principal() {
 
   await conferirIa();
 
-  const estado = criarEstado(supabase, usuario.id);
   const fluxo = criarFluxo(supabase, usuario.id);
+  const maestro = criarMaestro({ supabase, fluxo, userId: usuario.id });
 
-  await estado.anotar({ estado: "iniciando", detalhe: "Abrindo o WhatsApp." });
-  estado.baterCoracao();
+  /*
+    A escuta do painel e o follow-up sobem junto com o motor, nao junto com
+    um numero especifico: eles atendem todos. Quem decide por qual numero
+    cada mensagem sai e o maestro, olhando a conversa.
+  */
+  const escuta = criarEscuta({ supabase, fluxo, maestro, userId: usuario.id });
+  const seguimento = criarSeguimento({ supabase, maestro, userId: usuario.id });
 
-  const whatsapp = criarWhatsApp({ estado, fluxo });
+  const desligarEscuta = escuta.ligar();
+  const desligarSeguimento = seguimento.ligar();
 
-  // A escuta do painel so entra em cena quando o WhatsApp esta pronto:
-  // ela pode precisar enviar mensagem a qualquer momento.
-  let desligarEscuta = null;
-  let desligarSeguimento = null;
-  whatsapp.on("ready", () => {
-    if (desligarEscuta) return;
-
-    const escuta = criarEscuta({
-      supabase,
-      fluxo,
-      whatsapp,
-      userId: usuario.id,
-    });
-    desligarEscuta = escuta.ligar();
-    log.info("De olho no painel: respostas da fila e rascunhos aprovados.");
-
-    const seguimento = criarSeguimento({ supabase, whatsapp, userId: usuario.id });
-    desligarSeguimento = seguimento.ligar();
-    log.info("Follow-up ligado: cobra quem sumiu, das 8h às 20h, no máximo 3 vezes.");
-  });
+  log.info("De olho no painel: respostas da fila e rascunhos aprovados.");
+  log.info("Follow-up ligado: cobra quem sumiu, das 8h às 20h, no máximo 3 vezes.");
 
   // Fechar o programa tem que apagar a luz no painel, senao ele mente.
   let saindo = false;
@@ -97,20 +87,15 @@ async function principal() {
     log.info(`Encerrando (${sinal})…`);
     desligarEscuta?.();
     desligarSeguimento?.();
-    await estado.desligar("O motor foi fechado nesta máquina.");
-    try {
-      await whatsapp.destroy();
-    } catch {
-      // Se o navegador ja caiu, nao ha o que fechar.
-    }
+    await maestro.desligarTudo();
     process.exit(0);
   };
 
   process.on("SIGINT", () => encerrar("Ctrl+C"));
   process.on("SIGTERM", () => encerrar("SIGTERM"));
 
-  log.info("Abrindo o WhatsApp… na primeira vez isso demora um pouco.");
-  await whatsapp.initialize();
+  log.info("Abrindo seus números… na primeira vez isso demora um pouco.");
+  await maestro.ligar();
 }
 
 principal().catch(async (erro) => {

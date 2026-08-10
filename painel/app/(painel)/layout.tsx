@@ -3,7 +3,7 @@ import { BarraDeEstado } from "@/components/painel/BarraDeEstado";
 import { Rail } from "@/components/painel/Rail";
 import { Pulso } from "@/components/painel/Pulso";
 import { usuarioAtual } from "@/lib/supabase/servidor";
-import { resumoDoPainel, estadoDaConexao } from "@/lib/dados";
+import { resumoDoPainel, algumMotorLigado } from "@/lib/dados";
 
 export default async function LayoutDoPainel({
   children,
@@ -14,12 +14,10 @@ export default async function LayoutDoPainel({
   const usuario = await usuarioAtual();
   if (!usuario) redirect("/entrar");
 
-  const [{ abertas, rascunhos, bancoPronto }, conexao] = await Promise.all([
+  const [{ abertas, rascunhos, bancoPronto }, motorLigado] = await Promise.all([
     resumoDoPainel(),
-    estadoDaConexao(),
+    algumMotorLigado(),
   ]);
-
-  const motorLigado = conexao.ligado;
 
   return (
     <div className="flex min-h-screen flex-col">

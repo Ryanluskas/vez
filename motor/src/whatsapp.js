@@ -25,7 +25,6 @@ const RECADO_POR_TIPO = {
 function textoDaMensagem(msg) {
   const corpo = (msg.body ?? "").trim();
   const recado = RECADO_POR_TIPO[msg.type];
-
   if (!recado) return corpo;
   return corpo ? `${recado} ${corpo}` : recado;
 }
@@ -38,22 +37,23 @@ function ehConversaDeCliente(idDoChat) {
 /* O que conta como "mandou documento". Áudio e figurinha não contam. */
 const ARQUIVOS = new Set(["document", "image"]);
 
-/*
-  Manda o aviso pro WhatsApp do próprio consultor — a conversa que ele tem
-  consigo mesmo. É notificação que chega no bolso dele, sem depender de ele
-  estar com o painel aberto.
-*/
-async function avisarConsultor(cliente, texto) {
-  try {
-    const eu = cliente.info?.wid?._serialized;
-    if (eu) await cliente.sendMessage(eu, texto);
-  } catch (erro) {
-    log.erro(`não consegui te avisar no WhatsApp: ${erro.message}`);
-  }
+/* Cada número tem a própria pasta de sessão e o próprio bilhete de reparo. */
+export function pastaDaSessao(idConexao) {
+  return path.join(RAIZ, "sessao", "whatsapp", idConexao);
 }
 
-const PASTA_DA_SESSAO = path.join(RAIZ, "sessao", "whatsapp");
-const MARCA_DE_REPAREAR = path.join(RAIZ, "sessao", "refazer-pareamento");
+function marcaDeReparear(idConexao) {
+  return path.join(RAIZ, "sessao", `refazer-${idConexao}`);
+}
+
+export function pedirNovoPareamento(idConexao) {
+  try {
+    fs.mkdirSync(path.join(RAIZ, "sessao"), { recursive: true });
+    fs.writeFileSync(marcaDeReparear(idConexao), new Date().toISOString());
+  } catch {
+    // Sem o bilhete o consultor apaga a pasta na mao; a mensagem diz como.
+  }
+}
 
 /*
   Quando o WhatsApp desconecta com LOGOUT — o consultor removeu o aparelho
@@ -64,28 +64,34 @@ const MARCA_DE_REPAREAR = path.join(RAIZ, "sessao", "refazer-pareamento");
   Nao da pra apagar na hora do LOGOUT: o navegador ainda esta com os
   arquivos abertos. Entao deixa um bilhete e limpa no proximo boot.
 */
-function limparSessaoSePreciso() {
-  if (!fs.existsSync(MARCA_DE_REPAREAR)) return;
+function limparSessaoSePreciso(idConexao, apelido) {
+  const bilhete = marcaDeReparear(idConexao);
+  if (!fs.existsSync(bilhete)) return;
 
   try {
-    fs.rmSync(PASTA_DA_SESSAO, { recursive: true, force: true });
-    fs.rmSync(MARCA_DE_REPAREAR, { force: true });
-    log.alerta("A sessão anterior foi encerrada no celular. Vou pedir o QR de novo.");
+    fs.rmSync(pastaDaSessao(idConexao), { recursive: true, force: true });
+    fs.rmSync(bilhete, { force: true });
+    log.alerta(`[${apelido}] sessão anterior encerrada. Vou pedir o QR de novo.`);
   } catch (erro) {
     log.erro(
-      `Não consegui limpar a sessão antiga: ${erro.message}. ` +
-        `Apague a pasta motor/sessao/whatsapp na mão e rode de novo.`
+      `[${apelido}] não consegui limpar a sessão antiga: ${erro.message}. ` +
+        `Apague ${pastaDaSessao(idConexao)} na mão.`
     );
   }
 }
 
-export function criarWhatsApp({ estado, fluxo }) {
-  limparSessaoSePreciso();
+/*
+  Um cliente de WhatsApp para UM número. O motor cria um destes por linha
+  ativa em `conexoes` — cada um com sua sessão, seu Chromium e seu estado.
+*/
+export function criarWhatsApp({ conexao, estado, fluxo }) {
+  const apelido = conexao.apelido ?? "Principal";
+  limparSessaoSePreciso(conexao.id, apelido);
 
   const cliente = new Client({
     authStrategy: new LocalAuth({
-      clientId: "vez",
-      dataPath: path.join(RAIZ, "sessao", "whatsapp"),
+      clientId: `vez-${conexao.id}`,
+      dataPath: pastaDaSessao(conexao.id),
     }),
     puppeteer: {
       headless: true,
@@ -104,29 +110,33 @@ export function criarWhatsApp({ estado, fluxo }) {
     await estado.anotar({
       estado: "aguardando_qr",
       qr: imagem,
-      detalhe: "Abra o painel em Conexão e leia o código pelo WhatsApp do celular.",
+      detalhe: `Abra o painel em Conexão e leia o código de "${apelido}" pelo celular.`,
     });
 
-    log.destaque("QR pronto. Abra a tela Conexão no painel para escanear.");
+    log.destaque(`[${apelido}] QR pronto. Abra a tela Conexão no painel.`);
   });
 
   cliente.on("authenticated", async () => {
-    await estado.anotar({ estado: "iniciando", qr: null, detalhe: "Pareado, carregando o WhatsApp." });
-    log.info("Pareado. Carregando…");
+    await estado.anotar({
+      estado: "iniciando",
+      qr: null,
+      detalhe: "Pareado, carregando o WhatsApp.",
+    });
+    log.info(`[${apelido}] pareado. Carregando…`);
   });
 
   cliente.on("auth_failure", async (motivo) => {
+    pedirNovoPareamento(conexao.id);
     await estado.anotar({
       estado: "desligado",
       qr: null,
-      detalhe: "O pareamento falhou. Apague motor/sessao/whatsapp e escaneie de novo.",
+      detalhe: "O pareamento falhou. Ligue o motor de novo e escaneie um QR novo.",
     });
-    log.erro("Pareamento recusado:", motivo);
+    log.erro(`[${apelido}] pareamento recusado:`, motivo);
   });
 
   cliente.on("ready", async () => {
     const eu = cliente.info?.wid?.user ?? null;
-
     await estado.anotar({
       estado: "conectado",
       qr: null,
@@ -134,22 +144,12 @@ export function criarWhatsApp({ estado, fluxo }) {
       aparelho: cliente.info?.pushname ?? null,
       detalhe: null,
     });
-
-    log.destaque(`Conectado como ${cliente.info?.pushname ?? eu}. Atendendo.`);
+    log.destaque(`[${apelido}] conectado como ${cliente.info?.pushname ?? eu}. Atendendo.`);
   });
 
   cliente.on("disconnected", async (motivo) => {
     const foiLogout = String(motivo).toUpperCase().includes("LOGOUT");
-
-    if (foiLogout) {
-      // Bilhete pro proximo boot apagar a sessao morta.
-      try {
-        fs.mkdirSync(path.dirname(MARCA_DE_REPAREAR), { recursive: true });
-        fs.writeFileSync(MARCA_DE_REPAREAR, new Date().toISOString());
-      } catch {
-        // Sem o bilhete o consultor apaga a pasta na mao; a mensagem diz como.
-      }
-    }
+    if (foiLogout) pedirNovoPareamento(conexao.id);
 
     await estado.anotar({
       estado: "desligado",
@@ -161,8 +161,8 @@ export function criarWhatsApp({ estado, fluxo }) {
 
     log.alerta(
       foiLogout
-        ? "Sessão encerrada no celular. Na próxima vez vou pedir o QR de novo."
-        : `Desconectado: ${motivo}`
+        ? `[${apelido}] sessão encerrada no celular. Vou pedir o QR na próxima vez.`
+        : `[${apelido}] desconectado: ${motivo}`
     );
   });
 
@@ -188,6 +188,7 @@ export function criarWhatsApp({ estado, fluxo }) {
       }
 
       const conversa = await fluxo.registrar({
+        idConexao: conexao.id,
         telefone,
         nome,
         texto,
@@ -195,15 +196,15 @@ export function criarWhatsApp({ estado, fluxo }) {
       });
 
       log.info(
-        `${msg.fromMe ? "→" : "←"} ${nome ?? telefone}: ${texto.slice(0, 60)}${
-          texto.length > 60 ? "…" : ""
+        `[${apelido}] ${msg.fromMe ? "→" : "←"} ${nome ?? telefone}: ${texto.slice(0, 55)}${
+          texto.length > 55 ? "…" : ""
         }`
       );
 
       /*
         So mensagem de cliente aciona o cerebro. O que o consultor manda do
-        proprio celular fica gravado (vira material de estilo na Fase 5), mas
-        nao dispara classificacao — senao o bot responderia a si mesmo.
+        proprio celular fica gravado, mas nao dispara classificacao — senao
+        o bot responderia a si mesmo.
       */
       if (msg.fromMe) return;
 
@@ -214,17 +215,31 @@ export function criarWhatsApp({ estado, fluxo }) {
       */
       if (msg.hasMedia && ARQUIVOS.has(msg.type) && conversa.atender !== false) {
         await fluxo.marcarDocumentoRecebido(conversa);
-        await avisarConsultor(cliente, avisoDeDocumento(conversa));
-        log.destaque(`📄 ${nome ?? telefone} mandou documento.`);
+        await avisarConsultor(cliente, `${avisoDeDocumento(conversa)} (${apelido})`);
+        log.destaque(`[${apelido}] 📄 ${nome ?? telefone} mandou documento.`);
         return;
       }
 
       await fluxo.processarRecebida(conversa, texto, nome);
     } catch (erro) {
       // Uma mensagem que falha nao pode derrubar o atendimento das outras.
-      log.erro("Não consegui registrar uma mensagem:", erro.message);
+      log.erro(`[${apelido}] não consegui registrar uma mensagem: ${erro.message}`);
     }
   });
 
   return cliente;
+}
+
+/*
+  Manda o aviso pro WhatsApp do próprio consultor — a conversa que ele tem
+  consigo mesmo. É notificação que chega no bolso dele, sem depender de ele
+  estar com o painel aberto.
+*/
+async function avisarConsultor(cliente, texto) {
+  try {
+    const eu = cliente.info?.wid?._serialized;
+    if (eu) await cliente.sendMessage(eu, texto);
+  } catch (erro) {
+    log.erro(`não consegui te avisar no WhatsApp: ${erro.message}`);
+  }
 }
