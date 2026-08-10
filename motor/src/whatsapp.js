@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import wweb from "whatsapp-web.js";
 import QRCode from "qrcode";
@@ -51,7 +52,36 @@ async function avisarConsultor(cliente, texto) {
   }
 }
 
+const PASTA_DA_SESSAO = path.join(RAIZ, "sessao", "whatsapp");
+const MARCA_DE_REPAREAR = path.join(RAIZ, "sessao", "refazer-pareamento");
+
+/*
+  Quando o WhatsApp desconecta com LOGOUT — o consultor removeu o aparelho
+  pelo celular, ou a sessao expirou — as credenciais gravadas viram lixo.
+  Reaproveitar elas faz o motor tentar autenticar com uma sessao morta em
+  vez de mostrar QR novo, e ele fica preso nisso.
+
+  Nao da pra apagar na hora do LOGOUT: o navegador ainda esta com os
+  arquivos abertos. Entao deixa um bilhete e limpa no proximo boot.
+*/
+function limparSessaoSePreciso() {
+  if (!fs.existsSync(MARCA_DE_REPAREAR)) return;
+
+  try {
+    fs.rmSync(PASTA_DA_SESSAO, { recursive: true, force: true });
+    fs.rmSync(MARCA_DE_REPAREAR, { force: true });
+    log.alerta("A sessão anterior foi encerrada no celular. Vou pedir o QR de novo.");
+  } catch (erro) {
+    log.erro(
+      `Não consegui limpar a sessão antiga: ${erro.message}. ` +
+        `Apague a pasta motor/sessao/whatsapp na mão e rode de novo.`
+    );
+  }
+}
+
 export function criarWhatsApp({ estado, fluxo }) {
+  limparSessaoSePreciso();
+
   const cliente = new Client({
     authStrategy: new LocalAuth({
       clientId: "vez",
@@ -109,12 +139,31 @@ export function criarWhatsApp({ estado, fluxo }) {
   });
 
   cliente.on("disconnected", async (motivo) => {
+    const foiLogout = String(motivo).toUpperCase().includes("LOGOUT");
+
+    if (foiLogout) {
+      // Bilhete pro proximo boot apagar a sessao morta.
+      try {
+        fs.mkdirSync(path.dirname(MARCA_DE_REPAREAR), { recursive: true });
+        fs.writeFileSync(MARCA_DE_REPAREAR, new Date().toISOString());
+      } catch {
+        // Sem o bilhete o consultor apaga a pasta na mao; a mensagem diz como.
+      }
+    }
+
     await estado.anotar({
       estado: "desligado",
       qr: null,
-      detalhe: `O WhatsApp desconectou (${motivo}). Rode o motor de novo.`,
+      detalhe: foiLogout
+        ? "O aparelho foi desconectado pelo celular, ou a sessão expirou. Ligue o motor de novo e escaneie o QR — ele aparece aqui."
+        : `O WhatsApp caiu (${motivo}). Ligue o motor de novo.`,
     });
-    log.alerta("Desconectado:", motivo);
+
+    log.alerta(
+      foiLogout
+        ? "Sessão encerrada no celular. Na próxima vez vou pedir o QR de novo."
+        : `Desconectado: ${motivo}`
+    );
   });
 
   /*
