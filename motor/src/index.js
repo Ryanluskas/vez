@@ -4,6 +4,7 @@ import { criarFluxo } from "./fluxo.js";
 import { criarMaestro } from "./conexoes.js";
 import { criarEscuta } from "./escuta.js";
 import { criarSeguimento } from "./seguimento.js";
+import { pegarTrava, soltarTrava } from "./instancia.js";
 import {
   ollamaVivo,
   modeloDisponivel,
@@ -54,6 +55,9 @@ async function conferirIa() {
 async function principal() {
   log.destaque("vez · motor");
 
+  // Antes de qualquer coisa: nao pode existir um segundo motor.
+  if (!pegarTrava()) process.exit(0);
+
   const ambiente = lerAmbiente();
 
   const supabase = criarClienteDoMotor(ambiente);
@@ -88,6 +92,7 @@ async function principal() {
     desligarEscuta?.();
     desligarSeguimento?.();
     await maestro.desligarTudo();
+    soltarTrava();
     process.exit(0);
   };
 
