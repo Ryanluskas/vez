@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { RAIZ } from "./ambiente.js";
 import { criarEstado } from "./estado.js";
-import { criarWhatsApp, pedirNovoPareamento } from "./whatsapp.js";
+import { criarWhatsApp, pedirNovoPareamento, apelidoCurto } from "./whatsapp.js";
 import { matarChromiumsOrfaos } from "./limpeza.js";
 import { log } from "./log.js";
 
@@ -69,8 +69,26 @@ export function criarMaestro({ supabase, fluxo, userId }) {
     QR resolve.
   */
   const TENTATIVAS = 3;
+  const DESCANSO_MS = 5 * 60 * 1000;
+
+  // idConexao -> instante a partir do qual pode tentar de novo
+  const emEspera = new Map();
+
+  /*
+    Conexoes com abertura em andamento.
+
+    Sem isto acontece o pior bug desta parte: uma tentativa falha, a conexao
+    sai de `ligados`, e a reconferencia de 30s ve que ela nao esta ligada e
+    inicia OUTRA abertura em paralelo com a retentativa. Dois Chromium
+    disputando o mesmo perfil derrubam um ao outro, e o erro que aparece —
+    "Execution context was destroyed" — nao tem nada a ver com a causa.
+  */
+  const abrindo = new Set();
 
   async function ligar(conexao, tentativa = 1) {
+    if (abrindo.has(conexao.id)) return;
+    abrindo.add(conexao.id);
+
     const apelido = conexao.apelido ?? "Principal";
     log.info(
       `[${apelido}] abrindo o WhatsApp…${tentativa > 1 ? ` (tentativa ${tentativa})` : ""}`
@@ -84,7 +102,9 @@ export function criarMaestro({ supabase, fluxo, userId }) {
     ligados.set(conexao.id, { cliente, estado, apelido });
 
     // initialize() demora e pode falhar; nao pode travar os outros numeros.
-    cliente.initialize().catch(async (erro) => {
+    cliente.initialize().then(
+      () => abrindo.delete(conexao.id),
+      async (erro) => {
       log.erro(`[${apelido}] não abriu: ${erro.message}`);
       ligados.delete(conexao.id);
 
@@ -95,9 +115,17 @@ export function criarMaestro({ supabase, fluxo, userId }) {
       }
 
       if (tentativa >= TENTATIVAS) {
+        /*
+          Desistiu. Sem esta espera, a reconferencia de 30s recomeçaria o
+          ciclo pra sempre — e o log vira uma parede de erro que esconde
+          qualquer outra coisa acontecendo.
+        */
+        abrindo.delete(conexao.id);
+        emEspera.set(conexao.id, Date.now() + DESCANSO_MS);
         await estado.desligar(
           `Não consegui abrir o WhatsApp depois de ${TENTATIVAS} tentativas: ${erro.message}`
         );
+        log.alerta(`[${apelido}] vou tentar de novo em 5 minutos.`);
         return;
       }
 
@@ -113,11 +141,15 @@ export function criarMaestro({ supabase, fluxo, userId }) {
       });
 
       setTimeout(() => {
+        // Libera a trava so na hora de recomecar, nunca antes: e ela que
+        // impede a reconferencia de abrir um segundo Chromium no meio.
+        abrindo.delete(conexao.id);
         ligar(conexao, tentativa + 1).catch((e) =>
           log.erro(`[${apelido}] ${e.message}`)
         );
-      }, 5000);
-    });
+      }, 8000);
+      }
+    );
   }
 
   /*
@@ -125,13 +157,14 @@ export function criarMaestro({ supabase, fluxo, userId }) {
     (dezenas de MB). Sem esta limpeza, a pasta sessao/ so cresce.
   */
   function varrerSessoesOrfas(idsQueExistem) {
-    const raizDasSessoes = path.join(RAIZ, "sessao", "whatsapp");
+    const raizDasSessoes = path.join(RAIZ, "sessao", "wa");
     if (!fs.existsSync(raizDasSessoes)) return;
 
+    // As pastas usam o apelido curto do id, nao o UUID inteiro.
+    const curtosVivos = new Set([...idsQueExistem].map(apelidoCurto));
+
     for (const nome of fs.readdirSync(raizDasSessoes)) {
-      // "session-vez" e do formato antigo, de quando so havia um numero.
-      const ehOrfa = nome === "session-vez" || !idsQueExistem.has(nome);
-      if (!ehOrfa) continue;
+      if (curtosVivos.has(nome)) continue;
 
       try {
         fs.rmSync(path.join(raizDasSessoes, nome), { recursive: true, force: true });
@@ -202,7 +235,10 @@ export function criarMaestro({ supabase, fluxo, userId }) {
         await desligar(conexao.id, "Número pausado no painel.");
         continue;
       }
-      if (!ligados.has(conexao.id)) {
+      if (!ligados.has(conexao.id) && !abrindo.has(conexao.id)) {
+        const descansando = emEspera.get(conexao.id);
+        if (descansando && Date.now() < descansando) continue;
+        emEspera.delete(conexao.id);
         await ligar(conexao);
       }
     }

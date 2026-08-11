@@ -37,9 +37,21 @@ function ehConversaDeCliente(idDoChat) {
 /* O que conta como "mandou documento". Áudio e figurinha não contam. */
 const ARQUIVOS = new Set(["document", "image"]);
 
-/* Cada número tem a própria pasta de sessão e o próprio bilhete de reparo. */
+/*
+  Cada número tem a própria pasta de sessão e o próprio bilhete de reparo.
+
+  O nome é curto de propósito. O Windows corta caminho em 260 caracteres, e
+  o Chrome cria arquivos fundos dentro do perfil ("Default/Extension Rules/
+  ..."). Com o UUID inteiro duas vezes — na pasta e no clientId — o caminho
+  já nascia com ~140 caracteres e o perfil quebrava pela metade. O sintoma
+  era "Execution context was destroyed", que não diz nada sobre caminho.
+*/
+export function apelidoCurto(idConexao) {
+  return String(idConexao).replace(/-/g, "").slice(0, 8);
+}
+
 export function pastaDaSessao(idConexao) {
-  return path.join(RAIZ, "sessao", "whatsapp", idConexao);
+  return path.join(RAIZ, "sessao", "wa", apelidoCurto(idConexao));
 }
 
 function marcaDeReparear(idConexao) {
@@ -90,23 +102,27 @@ export function criarWhatsApp({ conexao, estado, fluxo }) {
 
   const cliente = new Client({
     authStrategy: new LocalAuth({
-      clientId: `vez-${conexao.id}`,
+      clientId: apelidoCurto(conexao.id),
       dataPath: pastaDaSessao(conexao.id),
     }),
+    /*
+      Nao mexer no userAgent aqui. A lib ja troca o dela por um Chrome
+      normal antes de abrir a pagina — sem isso o WhatsApp ve
+      "HeadlessChrome" e devolve "atualize o Google Chrome" em vez do QR.
+      Sobrescrever essa troca foi testado e nao ajudou.
+    */
     puppeteer: {
       headless: true,
+      /*
+        Esta lista e exatamente a que passou no teste isolado. Cada arg a
+        mais aqui ja custou horas de "Execution context was destroyed" —
+        nao acrescente nada sem testar o cliente sozinho antes.
+      */
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
-        /*
-          Sem isto o Chromium usa /dev/shm, que e pequeno, e a aba morre no
-          meio do carregamento do WhatsApp Web — que e exatamente o
-          "Execution context was destroyed" que aparece no painel.
-        */
         "--disable-dev-shm-usage",
         "--disable-gpu",
-        "--no-first-run",
-        "--no-default-browser-check",
       ],
     },
     /*
