@@ -50,6 +50,10 @@ export type Conexao = {
   aparelho: string | null;
   detalhe: string | null;
   vistoEm: string | null;
+  /* Importação: pedida (dias > 0) e em andamento (total != null). */
+  importarDias: number;
+  importarTotal: number | null;
+  importarFeitas: number;
 };
 
 /* O motor bate o coracao a cada 30s. Passou disso, tratamos como desligado. */
@@ -68,7 +72,9 @@ export async function conexoesDoUsuario(): Promise<{
 
   const { data, error } = await supabase
     .from("conexoes")
-    .select("id, apelido, ativa, desconectar_pedido, estado, qr, telefone, aparelho, detalhe, visto_em")
+    .select(
+      "id, apelido, ativa, desconectar_pedido, estado, qr, telefone, aparelho, detalhe, visto_em, importar_dias, importar_total, importar_feitas"
+    )
     .order("apelido");
 
   if (error) return { conexoes: [], tabelaPronta: false };
@@ -89,6 +95,9 @@ export async function conexoesDoUsuario(): Promise<{
       aparelho: linha.aparelho,
       detalhe: recente ? linha.detalhe : "O motor parou de responder nesta máquina.",
       vistoEm: linha.visto_em,
+      importarDias: linha.importar_dias ?? 0,
+      importarTotal: recente ? linha.importar_total : null,
+      importarFeitas: linha.importar_feitas ?? 0,
     };
   });
 

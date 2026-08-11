@@ -52,7 +52,7 @@ export function criarMaestro({ supabase, fluxo, userId }) {
   async function listar() {
     const { data, error } = await supabase
       .from("conexoes")
-      .select("id, apelido, ativa, desconectar_pedido, importar_dias")
+      .select("id, apelido, ativa, desconectar_pedido, importar_dias, importar_filtro")
       .order("apelido");
 
     if (error) {
@@ -226,13 +226,13 @@ export function criarMaestro({ supabase, fluxo, userId }) {
 
     await supabase
       .from("conexoes")
-      .update({ importar_dias: 0 })
+      .update({ importar_dias: 0, importar_total: null, importar_feitas: 0 })
       .eq("id", conexao.id);
 
     try {
       await vivo.estado.anotar({
         estado: "conectado",
-        detalhe: `Importando os últimos ${dias} dia(s)…`,
+        detalhe: `Lendo suas conversas dos últimos ${dias} dia(s)…`,
       });
 
       const r = await importarHistorico({
@@ -242,17 +242,39 @@ export function criarMaestro({ supabase, fluxo, userId }) {
         idConexao: conexao.id,
         apelido: vivo.apelido,
         dias,
+        filtro: conexao.importar_filtro ?? "todas",
+
+        /*
+          O progresso vai pro banco, nao so pro log: o painel roda na Vercel
+          e a janela do motor pode estar minimizada. Sem isto uma importacao
+          de 30 dias parece travada e o consultor clica de novo.
+        */
+        aoAvancar: async ({ total, feitas }) => {
+          await supabase
+            .from("conexoes")
+            .update({ importar_total: total, importar_feitas: feitas })
+            .eq("id", conexao.id);
+        },
       });
+
+      await supabase
+        .from("conexoes")
+        .update({ importar_total: null, importar_feitas: 0 })
+        .eq("id", conexao.id);
 
       await vivo.estado.anotar({
         estado: "conectado",
         detalhe:
-          `Importei ${r.novasConversas} conversa(s). ` +
-          `${r.esperandoVoce} falaram por último e não foram respondidas. ` +
+          `Importei ${r.novasConversas} conversa(s) e ${r.mensagensGravadas} mensagem(ns). ` +
+          `${r.esperandoVoce} falaram por último sem resposta sua. ` +
           `Nada foi respondido automaticamente.`,
       });
     } catch (erro) {
       log.erro(`[${vivo.apelido}] importação falhou: ${erro.message}`);
+      await supabase
+        .from("conexoes")
+        .update({ importar_total: null, importar_feitas: 0 })
+        .eq("id", conexao.id);
       await vivo.estado.anotar({
         estado: "conectado",
         detalhe: `A importação falhou: ${erro.message}`,

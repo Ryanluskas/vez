@@ -43,6 +43,14 @@ export function CartaoDeNumero({ conexao }: { conexao: Conexao }) {
   const erro = desc.erro ?? pausa.erro ?? rem.erro ?? imp.erro;
   const pedidoEmCurso = conexao.desconectando || desc.ok;
 
+  /*
+    O progresso vem do banco, escrito pelo motor — não do estado da tela.
+    Antes o botão dizia "Importando…" só porque o clique tinha ido, o que é
+    diferente de estar importando de verdade.
+  */
+  const rodando =
+    conexao.importarDias > 0 || conexao.importarTotal !== null || imp.ok;
+
   return (
     <article className="rounded-lg border border-fio bg-sup p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -139,35 +147,56 @@ export function CartaoDeNumero({ conexao }: { conexao: Conexao }) {
       </div>
 
       {conexao.estado === "conectado" && conexao.ativa && !pedidoEmCurso ? (
-        <form action={importar} className="mt-4 border-t border-fio pt-4">
-          <input type="hidden" name="id" value={conexao.id} />
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[12px] text-texto2">
-              Trazer conversas que já estavam no WhatsApp:
-            </span>
-            <select
-              name="dias"
-              defaultValue="7"
-              aria-label="Período a importar"
-              className="h-7 rounded-md border border-fio bg-sup px-2 text-[12px] text-texto focus:border-jade focus:outline-none"
-            >
-              <option value="2">últimos 2 dias</option>
-              <option value="7">últimos 7 dias</option>
-              <option value="30">últimos 30 dias</option>
-            </select>
-            <button
-              type="submit"
-              disabled={importando || imp.ok}
-              className="h-7 rounded-md border border-fio bg-sup px-2.5 text-[12px] text-texto transition-colors hover:border-fio-forte disabled:opacity-45"
-            >
-              {importando ? "Pedindo…" : imp.ok ? "Importando…" : "Importar"}
-            </button>
-          </div>
-          <p className="mt-1.5 text-[12px] leading-relaxed text-texto3">
-            Só organiza o que já aconteceu — não responde ninguém e não dispara
-            cobrança. As conversas entram como &quot;Novo&quot; pra você decidir.
-          </p>
-        </form>
+        <div className="mt-4 border-t border-fio pt-4">
+          {rodando ? (
+            <ProgressoDaImportacao
+              feitas={conexao.importarFeitas}
+              total={conexao.importarTotal}
+              pedido={conexao.importarDias > 0}
+            />
+          ) : (
+            <form action={importar}>
+              <input type="hidden" name="id" value={conexao.id} />
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[12px] text-texto2">
+                  Trazer conversas que já estavam no WhatsApp:
+                </span>
+                <select
+                  name="dias"
+                  defaultValue="7"
+                  aria-label="Período a importar"
+                  className="h-7 rounded-md border border-fio bg-sup px-2 text-[12px] text-texto focus:border-jade focus:outline-none"
+                >
+                  <option value="2">últimos 2 dias</option>
+                  <option value="7">últimos 7 dias</option>
+                  <option value="30">últimos 30 dias</option>
+                  <option value="90">últimos 90 dias</option>
+                </select>
+                <select
+                  name="filtro"
+                  defaultValue="todas"
+                  aria-label="Quais conversas importar"
+                  className="h-7 rounded-md border border-fio bg-sup px-2 text-[12px] text-texto focus:border-jade focus:outline-none"
+                >
+                  <option value="todas">todas</option>
+                  <option value="sem_resposta">só as não lidas</option>
+                </select>
+                <button
+                  type="submit"
+                  disabled={importando}
+                  className="h-7 rounded-md border border-fio bg-sup px-2.5 text-[12px] text-texto transition-colors hover:border-fio-forte disabled:opacity-45"
+                >
+                  {importando ? "Pedindo…" : "Importar"}
+                </button>
+              </div>
+              <p className="mt-1.5 text-[12px] leading-relaxed text-texto3">
+                Só organiza o que já aconteceu — não responde ninguém e não dispara
+                cobrança. As conversas entram como &quot;Novo&quot; pra você decidir.
+                &quot;Não lidas&quot; traz só quem tem a bolinha verde no seu celular.
+              </p>
+            </form>
+          )}
+        </div>
       ) : null}
 
       {conexao.qr && conexao.ativa && !pedidoEmCurso ? (
@@ -196,5 +225,52 @@ export function CartaoDeNumero({ conexao }: { conexao: Conexao }) {
         </p>
       ) : null}
     </article>
+  );
+}
+
+function ProgressoDaImportacao({
+  feitas,
+  total,
+  pedido,
+}: {
+  feitas: number;
+  total: number | null;
+  pedido: boolean;
+}) {
+  // Sem total ainda: o motor está lendo a lista de conversas do WhatsApp.
+  if (total === null) {
+    return (
+      <p className="text-[12px] text-texto2">
+        {pedido
+          ? "Pedido registrado. O motor começa em até 30 segundos…"
+          : "Lendo suas conversas no WhatsApp…"}
+      </p>
+    );
+  }
+
+  const parte = total > 0 ? Math.round((feitas / total) * 100) : 0;
+
+  return (
+    <div>
+      <p className="text-[12px] text-texto2">
+        Importando <span className="num text-texto">{feitas}</span> de{" "}
+        <span className="num text-texto">{total}</span> conversas…
+      </p>
+      <div
+        role="progressbar"
+        aria-valuenow={parte}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        className="mt-2 h-[3px] w-full overflow-hidden rounded-full bg-sup2"
+      >
+        <div
+          className="h-full bg-jade transition-[width] duration-500"
+          style={{ width: `${parte}%` }}
+        />
+      </div>
+      <p className="mt-1.5 text-[12px] text-texto3">
+        Nada está sendo respondido. Pode fechar esta tela — ele continua.
+      </p>
+    </div>
   );
 }

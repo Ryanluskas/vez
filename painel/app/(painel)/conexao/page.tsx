@@ -77,7 +77,12 @@ export default async function PaginaDeConexao() {
         sem mensalidade.
       </p>
 
-      <OlhoNaConexao conectado={algumLigado} />
+      <OlhoNaConexao
+        conectado={algumLigado}
+        importando={conexoes.some(
+          (c) => c.importarDias > 0 || c.importarTotal !== null
+        )}
+      />
     </Tela>
   );
 }

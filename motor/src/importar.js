@@ -18,8 +18,10 @@ import { log } from "./log.js";
   ============================================================================
 */
 
-const MAXIMO_DE_CONVERSAS = 200;
 const MENSAGENS_POR_CONVERSA = 40;
+
+/* De quantas em quantas conversas o painel é avisado do progresso. */
+const AVISAR_A_CADA = 5;
 
 /* Mesmo mapa do whatsapp.js: mensagem sem texto ainda é informação. */
 const RECADO_POR_TIPO = {
@@ -49,24 +51,43 @@ export async function importarHistorico({
   idConexao,
   apelido,
   dias,
+  filtro = "todas",
+  aoAvancar,
 }) {
   const corte = Date.now() - dias * 24 * 60 * 60 * 1000;
-  log.info(`[${apelido}] importando os últimos ${dias} dia(s)…`);
+  log.info(`[${apelido}] lendo as conversas do WhatsApp…`);
 
   const conversasDoWhats = await cliente.getChats();
 
-  const interessantes = conversasDoWhats
-    .filter(
-      (c) =>
-        !c.isGroup &&
-        String(c.id?._serialized ?? "").endsWith("@c.us") &&
-        (c.timestamp ?? 0) * 1000 >= corte
-    )
-    .slice(0, MAXIMO_DE_CONVERSAS);
+  let interessantes = conversasDoWhats.filter(
+    (c) =>
+      !c.isGroup &&
+      String(c.id?._serialized ?? "").endsWith("@c.us") &&
+      (c.timestamp ?? 0) * 1000 >= corte
+  );
+
+  /*
+    "sem_resposta" usa o contador de nao lidas do proprio WhatsApp — e o
+    mesmo criterio da bolinha verde que o consultor ja enxerga no celular.
+    Sem cap artificial: quem tem 800 conversas nao pode perder 600 sem saber
+    quais. O que limita e o periodo e o filtro, escolhidos por ele.
+  */
+  if (filtro === "sem_resposta") {
+    interessantes = interessantes.filter((c) => (c.unreadCount ?? 0) > 0);
+  }
+
+  const total = interessantes.length;
+  log.info(
+    `[${apelido}] ${total} conversa(s) no período` +
+      (filtro === "sem_resposta" ? " sem resposta sua" : "") +
+      `. Importando…`
+  );
+  await aoAvancar?.({ total, feitas: 0 });
 
   let novasConversas = 0;
   let mensagensGravadas = 0;
   let esperandoVoce = 0;
+  let feitas = 0;
 
   for (const chat of interessantes) {
     try {
@@ -153,6 +174,12 @@ export async function importarHistorico({
     } catch (erro) {
       // Uma conversa problematica nao pode abortar a importacao inteira.
       log.erro(`[${apelido}] pulei uma conversa: ${erro.message}`);
+    }
+
+    feitas++;
+    if (feitas % AVISAR_A_CADA === 0 || feitas === total) {
+      await aoAvancar?.({ total, feitas });
+      log.info(`[${apelido}] ${feitas}/${total} conversas`);
     }
   }
 

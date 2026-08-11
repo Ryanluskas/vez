@@ -10,7 +10,13 @@ import { criarClienteNavegador } from "@/lib/supabase/cliente";
   Realtime pra ser instantaneo, e uma batida de 4s como rede de seguranca
   caso o Realtime nao esteja ligado no projeto.
 */
-export function OlhoNaConexao({ conectado }: { conectado: boolean }) {
+export function OlhoNaConexao({
+  conectado,
+  importando = false,
+}: {
+  conectado: boolean;
+  importando?: boolean;
+}) {
   const router = useRouter();
 
   useEffect(() => {
@@ -28,14 +34,19 @@ export function OlhoNaConexao({ conectado }: { conectado: boolean }) {
       )
       .subscribe();
 
-    // Conectado já: a batida lenta só serve pra perceber se cair.
-    const intervalo = setInterval(() => router.refresh(), conectado ? 30_000 : 4_000);
+    /*
+      Importando: 3s, pra barra de progresso andar de verdade.
+      Esperando QR: 4s, porque o código troca sozinho.
+      Conectado e parado: 30s, só pra perceber se cair.
+    */
+    const passo = importando ? 3_000 : conectado ? 30_000 : 4_000;
+    const intervalo = setInterval(() => router.refresh(), passo);
 
     return () => {
       clearInterval(intervalo);
       supabase.removeChannel(canal);
     };
-  }, [router, conectado]);
+  }, [router, conectado, importando]);
 
   return null;
 }

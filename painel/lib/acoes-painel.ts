@@ -343,9 +343,12 @@ export async function pedirImportacao(
 ): Promise<Resultado> {
   const id = texto(dados, "id");
   const dias = Number(texto(dados, "dias"));
+  const filtro = texto(dados, "filtro") || "todas";
 
   if (!id) return { erro: "Número não identificado." };
-  if (![2, 7, 30].includes(dias)) return { erro: "Período inválido." };
+  if (![2, 7, 30, 90].includes(dias)) return { erro: "Período inválido." };
+  if (!["todas", "sem_resposta"].includes(filtro))
+    return { erro: "Filtro inválido." };
 
   try {
     await exigirLogin();
@@ -362,7 +365,7 @@ export async function pedirImportacao(
   */
   const { error } = await supabase
     .from("conexoes")
-    .update({ importar_dias: dias })
+    .update({ importar_dias: dias, importar_filtro: filtro })
     .eq("id", id);
 
   if (error) return { erro: `Não consegui pedir: ${error.message}` };
