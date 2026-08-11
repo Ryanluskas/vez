@@ -24,7 +24,7 @@ export function criarSeguimento({ supabase, maestro, userId }) {
     const { data, error } = await supabase
       .from("conversas")
       .select(
-        "id, telefone, nome, etapa, estagio, atender, seguir, followups_enviados, ultimo_followup_em, ultima_recebida_em, id_conexao"
+        "id, telefone, nome, etapa, estagio, atender, seguir, followups_enviados, ultimo_followup_em, ultima_recebida_em, id_conexao, id_chat"
       )
       .eq("atender", true)
       .eq("seguir", true)
@@ -47,7 +47,8 @@ export function criarSeguimento({ supabase, maestro, userId }) {
       if (!whatsapp) continue;
 
       try {
-        await whatsapp.sendMessage(`${conversa.telefone}@c.us`, decisao.texto);
+        const destino = conversa.id_chat ?? `${conversa.telefone}@c.us`;
+        await whatsapp.sendMessage(destino, decisao.texto);
 
         const agora = new Date().toISOString();
 

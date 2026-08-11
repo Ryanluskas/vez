@@ -79,7 +79,7 @@ export function criarEscuta({ supabase, fluxo, maestro, userId }) {
   async function enviar(rascunho) {
     const { data: conversa } = await supabase
       .from("conversas")
-      .select("id, telefone, nome, id_conexao")
+      .select("id, telefone, nome, id_conexao, id_chat")
       .eq("id", rascunho.id_conversa)
       .single();
 
@@ -99,7 +99,11 @@ export function criarEscuta({ supabase, fluxo, maestro, userId }) {
       );
     }
 
-    const destino = `${conversa.telefone}@c.us`;
+    /*
+      Enviar pelo id original da conversa. Reconstruir "telefone@c.us" nao
+      alcanca contato que so existe como @lid — e hoje sao 97% deles.
+    */
+    const destino = conversa.id_chat ?? `${conversa.telefone}@c.us`;
 
     // Envia primeiro, marca depois. Se cair a luz no meio, o pior caso e
     // mandar de novo — melhor que o cliente nunca receber e ninguem notar.

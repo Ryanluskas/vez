@@ -29,9 +29,42 @@ function textoDaMensagem(msg) {
   return corpo ? `${recado} ${corpo}` : recado;
 }
 
-/* Só conversa de pessoa: grupo, status e lista de transmissão ficam de fora. */
+/*
+  Só conversa de pessoa: grupo, status e lista de transmissão ficam de fora.
+
+  @lid é o identificador novo do WhatsApp — ele parou de usar o telefone
+  como id da conversa. Nesta conta, 102 das 105 conversas já são @lid e só
+  1 continua @c.us. Aceitar só @c.us, como era antes, fazia o bot ignorar
+  praticamente TODA mensagem que chegava, em silêncio.
+*/
 function ehConversaDeCliente(idDoChat) {
-  return typeof idDoChat === "string" && idDoChat.endsWith("@c.us");
+  const id = String(idDoChat ?? "");
+  return id.endsWith("@c.us") || id.endsWith("@lid");
+}
+
+/*
+  O telefone de verdade por trás do id. Com @lid ele não está no id, mas o
+  contato guarda em `phoneNumber`. Sem isso o consultor veria "13916230930575"
+  no lugar do número do cliente dele.
+*/
+async function telefoneDoContato(msg, idDoChat) {
+  try {
+    const contato = await msg.getContact();
+    const bruto =
+      contato?.phoneNumber?._serialized ??
+      contato?.phoneNumber ??
+      contato?.number ??
+      null;
+
+    if (bruto) return String(bruto).replace(/@.*$/, "");
+    if (contato?.id?._serialized?.endsWith("@c.us")) return contato.id.user;
+  } catch {
+    // Contato indisponível: cai pro id.
+  }
+
+  // Último recurso: o próprio id, que só vale quando ainda é @c.us.
+  const id = String(idDoChat ?? "");
+  return id.endsWith("@c.us") ? id.replace("@c.us", "") : id;
 }
 
 /* O que conta como "mandou documento". Áudio e figurinha não contam. */
@@ -220,16 +253,20 @@ export function criarWhatsApp({ conexao, estado, fluxo }) {
       const texto = textoDaMensagem(msg);
       if (!texto) return;
 
-      const telefone = idDoChat.replace("@c.us", "");
+      const telefone = await telefoneDoContato(msg, idDoChat);
 
       let nome = null;
       if (!msg.fromMe) {
         const contato = await msg.getContact();
-        nome = contato?.name || contato?.pushname || null;
+        // Com @lid, `name` vem como "+55 96 9907-2152" pra quem não está
+        // salvo. Isso é o telefone formatado, não um nome — não serve.
+        const bruto = contato?.name || contato?.pushname || null;
+        nome = bruto && !/^\+?[\d\s()-]+$/.test(bruto) ? bruto : null;
       }
 
       const conversa = await fluxo.registrar({
         idConexao: conexao.id,
+        idChat: idDoChat,
         telefone,
         nome,
         texto,

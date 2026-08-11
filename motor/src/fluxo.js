@@ -20,10 +20,17 @@ export function criarFluxo(supabase, userId) {
     O mesmo cliente escrevendo pro seu numero comercial e pro seu numero
     antigo sao duas conversas — historicos diferentes, etapas diferentes.
   */
-  async function garantirConversa({ idConexao, telefone, nome, ultimaMensagem, direcao }) {
+  async function garantirConversa({
+    idConexao,
+    idChat,
+    telefone,
+    nome,
+    ultimaMensagem,
+    direcao,
+  }) {
     const { data: existente, error: erroDaBusca } = await supabase
       .from("conversas")
-      .select("id, nome, estagio, atender, etapa, seguir")
+      .select("id, nome, estagio, atender, etapa, seguir, id_chat")
       .eq("telefone", telefone)
       .eq("id_conexao", idConexao)
       .maybeSingle();
@@ -36,6 +43,7 @@ export function criarFluxo(supabase, userId) {
         .insert({
           user_id: userId,
           id_conexao: idConexao,
+          id_chat: idChat ?? null,
           telefone,
           nome: nome ?? null,
           estagio: "aguardando_bot",
@@ -57,6 +65,8 @@ export function criarFluxo(supabase, userId) {
         // So preenche o nome se ainda nao tem: o que o consultor salvou
         // na agenda vale mais que o pushname do WhatsApp.
         nome: existente.nome ?? nome ?? null,
+        // Conversa antiga, gravada antes do @lid, ganha o id agora.
+        id_chat: existente.id_chat ?? idChat ?? null,
         ultima_mensagem: ultimaMensagem,
         ultima_direcao: direcao,
         atualizado_em: new Date().toISOString(),
@@ -170,9 +180,10 @@ export function criarFluxo(supabase, userId) {
 
   return {
     /* Grava a mensagem crua. Vale pros dois lados da conversa. */
-    async registrar({ idConexao, telefone, nome, texto, direcao }) {
+    async registrar({ idConexao, idChat, telefone, nome, texto, direcao }) {
       const conversa = await garantirConversa({
         idConexao,
+        idChat,
         telefone,
         nome,
         ultimaMensagem: texto,

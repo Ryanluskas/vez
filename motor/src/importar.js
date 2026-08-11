@@ -68,42 +68,55 @@ function descreverErro(erro) {
 async function listarConversas(cliente, apelido) {
   const tentativas = [
     {
+      /*
+        O caminho que funciona. Le a colecao crua e extrai so os 4 campos
+        que interessam.
+
+        O getChats() da lib usa a MESMA colecao, mas depois passa cada chat
+        por getChatModel(), que serializa tudo e chama coisas que o WhatsApp
+        mudou — e falha com um erro minificado ("r"). Como aqui nao se
+        serializa nada, a mudanca nao afeta.
+      */
+      nome: "coleção do WhatsApp",
+      async rodar() {
+        return await cliente.pupPage.evaluate(() => {
+          const col = window.require("WAWebCollections");
+          return col.Chat.getModelsArray().map((c) => {
+            const id = c.id?._serialized ?? null;
+
+            // Com @lid o telefone nao esta no id: vem do contato.
+            const doContato =
+              c.contact?.phoneNumber?._serialized ??
+              c.contact?.phoneNumber ??
+              null;
+
+            const nomeCru = c.name ?? c.formattedTitle ?? null;
+
+            return {
+              id,
+              // "+55 96 9907-2152" e telefone formatado, nao nome.
+              nome: nomeCru && !/^\+?[\d\s()-]+$/.test(nomeCru) ? nomeCru : null,
+              telefone: String(doContato ?? id ?? "").replace(/@.*$/, ""),
+              timestamp: c.t ?? 0,
+              naoLidas: c.unreadCount ?? 0,
+              ehGrupo: !!c.isGroup,
+            };
+          });
+        });
+      },
+    },
+    {
       nome: "getChats da biblioteca",
       async rodar() {
         const chats = await cliente.getChats();
         return chats.map((c) => ({
           id: c.id?._serialized,
           nome: c.name ?? null,
+          telefone: String(c.id?.user ?? ""),
           timestamp: c.timestamp ?? 0,
           naoLidas: c.unreadCount ?? 0,
+          ehGrupo: !!c.isGroup,
         }));
-      },
-    },
-    {
-      nome: "WWebJS injetado",
-      async rodar() {
-        const crus = await cliente.pupPage.evaluate(async () =>
-          (await window.WWebJS.getChats()).map((c) => ({
-            id: c.id?._serialized,
-            nome: c.name ?? c.formattedTitle ?? null,
-            timestamp: c.t ?? c.timestamp ?? 0,
-            naoLidas: c.unreadCount ?? 0,
-          }))
-        );
-        return crus;
-      },
-    },
-    {
-      nome: "Store direto",
-      async rodar() {
-        return await cliente.pupPage.evaluate(() =>
-          window.Store.Chat.getModelsArray().map((c) => ({
-            id: c.id?._serialized,
-            nome: c.name ?? c.formattedTitle ?? null,
-            timestamp: c.t ?? 0,
-            naoLidas: c.unreadCount ?? 0,
-          }))
-        );
       },
     },
   ];
@@ -131,35 +144,28 @@ async function listarConversas(cliente, apelido) {
   Dois caminhos, e devolve sempre o mesmo formato simples pro resto do
   arquivo não precisar saber por onde veio.
 */
+/*
+  Mensagens pela mesma coleção. Traz o que o WhatsApp já tem carregado na
+  conversa — que é o histórico recente, exatamente o que interessa aqui.
+*/
 async function buscarMensagens(cliente, idChat) {
-  try {
-    const chat = await cliente.getChatById(idChat);
-    const msgs = await chat.fetchMessages({ limit: MENSAGENS_POR_CONVERSA });
-    return msgs
-      .filter((m) => !m.isStatus)
-      .map((m) => ({
-        id: m.id?._serialized ?? null,
-        fromMe: !!m.fromMe,
-        timestamp: m.timestamp ?? 0,
-        type: m.type,
-        body: m.body ?? "",
-      }));
-  } catch {
-    // Cai pro cru.
-  }
-
   return await cliente.pupPage.evaluate(
-    async (id, limite) => {
-      const chat = window.Store.Chat.get(id);
+    (id, limite) => {
+      const col = window.require("WAWebCollections");
+      const chat = col.Chat.get(id);
       if (!chat) return [];
+
       const modelos = chat.msgs?.getModelsArray?.() ?? [];
-      return modelos.slice(-limite).map((m) => ({
-        id: m.id?._serialized ?? null,
-        fromMe: !!m.id?.fromMe,
-        timestamp: m.t ?? 0,
-        type: m.type,
-        body: m.body ?? m.caption ?? "",
-      }));
+      return modelos
+        .slice(-limite)
+        .filter((m) => !m.isStatusV3)
+        .map((m) => ({
+          id: m.id?._serialized ?? null,
+          fromMe: !!m.id?.fromMe,
+          timestamp: m.t ?? 0,
+          type: m.type,
+          body: m.body ?? m.caption ?? "",
+        }));
     },
     idChat,
     MENSAGENS_POR_CONVERSA
@@ -181,9 +187,15 @@ export async function importarHistorico({
 
   const conversasDoWhats = await listarConversas(cliente, apelido);
 
-  // Só conversa de pessoa: grupo e lista de transmissão ficam de fora.
+  /*
+    Só conversa de pessoa. @lid é o identificador novo do WhatsApp — nesta
+    conta são 102 de 105. Filtrar só por @c.us descartaria quase tudo.
+  */
   let interessantes = conversasDoWhats.filter(
-    (c) => String(c.id).endsWith("@c.us") && c.timestamp * 1000 >= corte
+    (c) =>
+      !c.ehGrupo &&
+      (String(c.id).endsWith("@c.us") || String(c.id).endsWith("@lid")) &&
+      c.timestamp * 1000 >= corte
   );
 
   /*
@@ -211,7 +223,7 @@ export async function importarHistorico({
 
   for (const chat of interessantes) {
     try {
-      const telefone = String(chat.id).replace("@c.us", "");
+      const telefone = chat.telefone || String(chat.id).replace(/@.*$/, "");
       const mensagens = (await buscarMensagens(cliente, chat.id)).filter(
         (m) => m.timestamp * 1000 >= corte
       );
@@ -238,6 +250,7 @@ export async function importarHistorico({
           .insert({
             user_id: userId,
             id_conexao: idConexao,
+            id_chat: chat.id,
             telefone,
             nome: chat.nome || null,
             /*
@@ -262,7 +275,7 @@ export async function importarHistorico({
       } else {
         await supabase
           .from("conversas")
-          .update({ ultima_direcao: ultimaDirecao })
+          .update({ ultima_direcao: ultimaDirecao, id_chat: chat.id })
           .eq("id", idConversa);
       }
 
