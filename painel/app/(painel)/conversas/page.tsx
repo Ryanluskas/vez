@@ -14,6 +14,7 @@ export const metadata: Metadata = { title: "Conversas" };
 */
 const FILTROS = [
   { chave: "todas", nome: "Todas", campo: null, valor: null },
+  { chave: "sem_resposta", nome: "Sem resposta sua", campo: "ultima_direcao", valor: "recebida" },
   { chave: "documentos_recebidos", nome: "Mandaram documento", campo: "etapa", valor: "documentos_recebidos" },
   { chave: "aguardando_documentos", nome: "Devendo documento", campo: "etapa", valor: "aguardando_documentos" },
   { chave: "conversando", nome: "Conversando", campo: "etapa", valor: "conversando" },
@@ -35,7 +36,7 @@ export default async function PaginaDeConversas({
   let consulta = supabase
     .from("conversas")
     .select(
-      "id, telefone, nome, estagio, etapa, ultima_mensagem, atualizado_em, atender, seguir, followups_enviados"
+      "id, telefone, nome, estagio, etapa, ultima_mensagem, atualizado_em, atender, seguir, followups_enviados, ultima_direcao"
     )
     .order("atualizado_em", { ascending: false })
     .limit(100);

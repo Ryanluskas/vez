@@ -4,6 +4,7 @@ import { RAIZ } from "./ambiente.js";
 import { criarEstado } from "./estado.js";
 import { criarWhatsApp, pedirNovoPareamento, apelidoCurto } from "./whatsapp.js";
 import { matarChromiumsOrfaos } from "./limpeza.js";
+import { importarHistorico } from "./importar.js";
 import { log } from "./log.js";
 
 /*
@@ -51,7 +52,7 @@ export function criarMaestro({ supabase, fluxo, userId }) {
   async function listar() {
     const { data, error } = await supabase
       .from("conexoes")
-      .select("id, apelido, ativa, desconectar_pedido")
+      .select("id, apelido, ativa, desconectar_pedido, importar_dias")
       .order("apelido");
 
     if (error) {
@@ -212,6 +213,53 @@ export function criarMaestro({ supabase, fluxo, userId }) {
       .eq("id", conexao.id);
   }
 
+  /*
+    O painel pediu o histórico. Só roda com o número já conectado — e a
+    bandeira é zerada ANTES de importar: se a importação demorar mais que os
+    30s da reconferência, ela não pode ser disparada duas vezes em paralelo.
+  */
+  async function atenderPedidoDeImportacao(conexao) {
+    const vivo = ligados.get(conexao.id);
+    if (!vivo || !vivo.cliente.info?.wid) return;
+
+    const dias = conexao.importar_dias;
+
+    await supabase
+      .from("conexoes")
+      .update({ importar_dias: 0 })
+      .eq("id", conexao.id);
+
+    try {
+      await vivo.estado.anotar({
+        estado: "conectado",
+        detalhe: `Importando os últimos ${dias} dia(s)…`,
+      });
+
+      const r = await importarHistorico({
+        supabase,
+        cliente: vivo.cliente,
+        userId,
+        idConexao: conexao.id,
+        apelido: vivo.apelido,
+        dias,
+      });
+
+      await vivo.estado.anotar({
+        estado: "conectado",
+        detalhe:
+          `Importei ${r.novasConversas} conversa(s). ` +
+          `${r.esperandoVoce} falaram por último e não foram respondidas. ` +
+          `Nada foi respondido automaticamente.`,
+      });
+    } catch (erro) {
+      log.erro(`[${vivo.apelido}] importação falhou: ${erro.message}`);
+      await vivo.estado.anotar({
+        estado: "conectado",
+        detalhe: `A importação falhou: ${erro.message}`,
+      });
+    }
+  }
+
   async function reconferir() {
     const conexoes = await listar();
     if (!conexoes) return;
@@ -240,7 +288,11 @@ export function criarMaestro({ supabase, fluxo, userId }) {
         if (descansando && Date.now() < descansando) continue;
         emEspera.delete(conexao.id);
         await ligar(conexao);
+        continue;
       }
+
+      // Ja conectado: o painel pediu pra trazer o historico?
+      if (conexao.importar_dias > 0) await atenderPedidoDeImportacao(conexao);
     }
 
     // Linha apagada no painel: derruba o cliente que sobrou.

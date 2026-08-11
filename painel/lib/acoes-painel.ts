@@ -337,6 +337,40 @@ export async function pedirDesconexao(
   return { ok: true };
 }
 
+export async function pedirImportacao(
+  _anterior: Resultado,
+  dados: FormData
+): Promise<Resultado> {
+  const id = texto(dados, "id");
+  const dias = Number(texto(dados, "dias"));
+
+  if (!id) return { erro: "Número não identificado." };
+  if (![2, 7, 30].includes(dias)) return { erro: "Período inválido." };
+
+  try {
+    await exigirLogin();
+  } catch (e) {
+    return { erro: (e as Error).message };
+  }
+
+  const supabase = await criarClienteServidor();
+
+  /*
+    Levanta a bandeira; o motor traz o histórico em até 30 segundos.
+    Importar não responde nada: as conversas entram como "novo", etapa que
+    o follow-up não cobra. Quem decide o que fazer com cada uma é você.
+  */
+  const { error } = await supabase
+    .from("conexoes")
+    .update({ importar_dias: dias })
+    .eq("id", id);
+
+  if (error) return { erro: `Não consegui pedir: ${error.message}` };
+
+  revalidatePath("/conexao");
+  return { ok: true };
+}
+
 export async function alternarConexaoAtiva(
   _anterior: Resultado,
   dados: FormData

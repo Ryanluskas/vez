@@ -5,6 +5,7 @@ import {
   pedirDesconexao,
   alternarConexaoAtiva,
   apagarConexao,
+  pedirImportacao,
   type Resultado,
 } from "@/lib/acoes-painel";
 import type { Conexao } from "@/lib/dados";
@@ -34,8 +35,12 @@ export function CartaoDeNumero({ conexao }: { conexao: Conexao }) {
     {} as Resultado
   );
   const [rem, apagar, apagando] = useActionState(apagarConexao, {} as Resultado);
+  const [imp, importar, importando] = useActionState(
+    pedirImportacao,
+    {} as Resultado
+  );
 
-  const erro = desc.erro ?? pausa.erro ?? rem.erro;
+  const erro = desc.erro ?? pausa.erro ?? rem.erro ?? imp.erro;
   const pedidoEmCurso = conexao.desconectando || desc.ok;
 
   return (
@@ -132,6 +137,38 @@ export function CartaoDeNumero({ conexao }: { conexao: Conexao }) {
           ) : null}
         </div>
       </div>
+
+      {conexao.estado === "conectado" && conexao.ativa && !pedidoEmCurso ? (
+        <form action={importar} className="mt-4 border-t border-fio pt-4">
+          <input type="hidden" name="id" value={conexao.id} />
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[12px] text-texto2">
+              Trazer conversas que já estavam no WhatsApp:
+            </span>
+            <select
+              name="dias"
+              defaultValue="7"
+              aria-label="Período a importar"
+              className="h-7 rounded-md border border-fio bg-sup px-2 text-[12px] text-texto focus:border-jade focus:outline-none"
+            >
+              <option value="2">últimos 2 dias</option>
+              <option value="7">últimos 7 dias</option>
+              <option value="30">últimos 30 dias</option>
+            </select>
+            <button
+              type="submit"
+              disabled={importando || imp.ok}
+              className="h-7 rounded-md border border-fio bg-sup px-2.5 text-[12px] text-texto transition-colors hover:border-fio-forte disabled:opacity-45"
+            >
+              {importando ? "Pedindo…" : imp.ok ? "Importando…" : "Importar"}
+            </button>
+          </div>
+          <p className="mt-1.5 text-[12px] leading-relaxed text-texto3">
+            Só organiza o que já aconteceu — não responde ninguém e não dispara
+            cobrança. As conversas entram como &quot;Novo&quot; pra você decidir.
+          </p>
+        </form>
+      ) : null}
 
       {conexao.qr && conexao.ativa && !pedidoEmCurso ? (
         <div className="mt-4 flex flex-col items-center border-t border-fio pt-5">

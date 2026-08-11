@@ -21,6 +21,8 @@ export type Conversa = {
   /* false = nunca mandar follow-up nesta conversa. */
   seguir: boolean;
   followups_enviados: number;
+  /* Quem falou por último. 'recebida' = a bola está com você. */
+  ultima_direcao: "recebida" | "enviada" | null;
 };
 
 /*

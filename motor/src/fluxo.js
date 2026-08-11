@@ -20,7 +20,7 @@ export function criarFluxo(supabase, userId) {
     O mesmo cliente escrevendo pro seu numero comercial e pro seu numero
     antigo sao duas conversas — historicos diferentes, etapas diferentes.
   */
-  async function garantirConversa({ idConexao, telefone, nome, ultimaMensagem }) {
+  async function garantirConversa({ idConexao, telefone, nome, ultimaMensagem, direcao }) {
     const { data: existente, error: erroDaBusca } = await supabase
       .from("conversas")
       .select("id, nome, estagio, atender, etapa, seguir")
@@ -40,6 +40,7 @@ export function criarFluxo(supabase, userId) {
           nome: nome ?? null,
           estagio: "aguardando_bot",
           ultima_mensagem: ultimaMensagem,
+          ultima_direcao: direcao ?? null,
           atualizado_em: new Date().toISOString(),
         })
         .select("id, nome, estagio, atender, etapa, seguir")
@@ -57,6 +58,7 @@ export function criarFluxo(supabase, userId) {
         // na agenda vale mais que o pushname do WhatsApp.
         nome: existente.nome ?? nome ?? null,
         ultima_mensagem: ultimaMensagem,
+        ultima_direcao: direcao,
         atualizado_em: new Date().toISOString(),
       })
       .eq("id", existente.id);
@@ -174,6 +176,7 @@ export function criarFluxo(supabase, userId) {
         telefone,
         nome,
         ultimaMensagem: texto,
+        direcao,
       });
 
       const { error } = await supabase.from("mensagens").insert({
