@@ -44,6 +44,128 @@ function textoDaMensagem(msg) {
   return corpo ? `${recado} ${corpo}` : recado;
 }
 
+/*
+  Erro que vem de dentro da pagina do WhatsApp chega minificado: a mensagem
+  e literalmente "r". Isso apareceu em producao e nao dizia nada. Aqui a
+  gente extrai tudo que da pra extrair antes de reportar.
+*/
+function descreverErro(erro) {
+  if (!erro) return "erro sem descrição";
+  const partes = [erro.name, erro.message].filter(Boolean).join(": ");
+  if (partes.length > 3) return partes;
+
+  // Mensagem inútil ("r"): tenta a primeira linha útil da pilha.
+  const pilha = String(erro.stack ?? "").split("\n").slice(0, 3).join(" | ");
+  return `${partes || "erro"} (${pilha || "sem pilha"})`;
+}
+
+/*
+  Listar conversas e a parte mais fragil da lib: ela depende de nomes
+  internos do WhatsApp Web, que mudam sem aviso. Por isso tres caminhos,
+  do mais suportado pro mais cru, e o log diz qual funcionou — quando o
+  primeiro quebrar de novo, a informacao ja esta na tela.
+*/
+async function listarConversas(cliente, apelido) {
+  const tentativas = [
+    {
+      nome: "getChats da biblioteca",
+      async rodar() {
+        const chats = await cliente.getChats();
+        return chats.map((c) => ({
+          id: c.id?._serialized,
+          nome: c.name ?? null,
+          timestamp: c.timestamp ?? 0,
+          naoLidas: c.unreadCount ?? 0,
+        }));
+      },
+    },
+    {
+      nome: "WWebJS injetado",
+      async rodar() {
+        const crus = await cliente.pupPage.evaluate(async () =>
+          (await window.WWebJS.getChats()).map((c) => ({
+            id: c.id?._serialized,
+            nome: c.name ?? c.formattedTitle ?? null,
+            timestamp: c.t ?? c.timestamp ?? 0,
+            naoLidas: c.unreadCount ?? 0,
+          }))
+        );
+        return crus;
+      },
+    },
+    {
+      nome: "Store direto",
+      async rodar() {
+        return await cliente.pupPage.evaluate(() =>
+          window.Store.Chat.getModelsArray().map((c) => ({
+            id: c.id?._serialized,
+            nome: c.name ?? c.formattedTitle ?? null,
+            timestamp: c.t ?? 0,
+            naoLidas: c.unreadCount ?? 0,
+          }))
+        );
+      },
+    },
+  ];
+
+  const problemas = [];
+
+  for (const tentativa of tentativas) {
+    try {
+      const lista = await tentativa.rodar();
+      if (Array.isArray(lista) && lista.length) {
+        log.info(`[${apelido}] li a lista de conversas via ${tentativa.nome}.`);
+        return lista.filter((c) => c.id);
+      }
+      problemas.push(`${tentativa.nome}: veio vazio`);
+    } catch (erro) {
+      problemas.push(`${tentativa.nome}: ${descreverErro(erro)}`);
+    }
+  }
+
+  throw new Error(`não consegui listar suas conversas. ${problemas.join(" · ")}`);
+}
+
+/*
+  Mesma fragilidade da listagem: buscar mensagem depende de nome interno.
+  Dois caminhos, e devolve sempre o mesmo formato simples pro resto do
+  arquivo não precisar saber por onde veio.
+*/
+async function buscarMensagens(cliente, idChat) {
+  try {
+    const chat = await cliente.getChatById(idChat);
+    const msgs = await chat.fetchMessages({ limit: MENSAGENS_POR_CONVERSA });
+    return msgs
+      .filter((m) => !m.isStatus)
+      .map((m) => ({
+        id: m.id?._serialized ?? null,
+        fromMe: !!m.fromMe,
+        timestamp: m.timestamp ?? 0,
+        type: m.type,
+        body: m.body ?? "",
+      }));
+  } catch {
+    // Cai pro cru.
+  }
+
+  return await cliente.pupPage.evaluate(
+    async (id, limite) => {
+      const chat = window.Store.Chat.get(id);
+      if (!chat) return [];
+      const modelos = chat.msgs?.getModelsArray?.() ?? [];
+      return modelos.slice(-limite).map((m) => ({
+        id: m.id?._serialized ?? null,
+        fromMe: !!m.id?.fromMe,
+        timestamp: m.t ?? 0,
+        type: m.type,
+        body: m.body ?? m.caption ?? "",
+      }));
+    },
+    idChat,
+    MENSAGENS_POR_CONVERSA
+  );
+}
+
 export async function importarHistorico({
   supabase,
   cliente,
@@ -57,13 +179,11 @@ export async function importarHistorico({
   const corte = Date.now() - dias * 24 * 60 * 60 * 1000;
   log.info(`[${apelido}] lendo as conversas do WhatsApp…`);
 
-  const conversasDoWhats = await cliente.getChats();
+  const conversasDoWhats = await listarConversas(cliente, apelido);
 
+  // Só conversa de pessoa: grupo e lista de transmissão ficam de fora.
   let interessantes = conversasDoWhats.filter(
-    (c) =>
-      !c.isGroup &&
-      String(c.id?._serialized ?? "").endsWith("@c.us") &&
-      (c.timestamp ?? 0) * 1000 >= corte
+    (c) => String(c.id).endsWith("@c.us") && c.timestamp * 1000 >= corte
   );
 
   /*
@@ -73,7 +193,7 @@ export async function importarHistorico({
     quais. O que limita e o periodo e o filtro, escolhidos por ele.
   */
   if (filtro === "sem_resposta") {
-    interessantes = interessantes.filter((c) => (c.unreadCount ?? 0) > 0);
+    interessantes = interessantes.filter((c) => c.naoLidas > 0);
   }
 
   const total = interessantes.length;
@@ -91,10 +211,10 @@ export async function importarHistorico({
 
   for (const chat of interessantes) {
     try {
-      const telefone = chat.id._serialized.replace("@c.us", "");
-      const mensagens = (await chat.fetchMessages({ limit: MENSAGENS_POR_CONVERSA }))
-        .filter((m) => (m.timestamp ?? 0) * 1000 >= corte)
-        .filter((m) => !m.isStatus);
+      const telefone = String(chat.id).replace("@c.us", "");
+      const mensagens = (await buscarMensagens(cliente, chat.id)).filter(
+        (m) => m.timestamp * 1000 >= corte
+      );
 
       if (mensagens.length === 0) continue;
 
@@ -119,7 +239,7 @@ export async function importarHistorico({
             user_id: userId,
             id_conexao: idConexao,
             telefone,
-            nome: chat.name || null,
+            nome: chat.nome || null,
             /*
               'novo' de proposito: e a unica etapa que o follow-up ignora.
               Historico importado nao pode virar cobranca automatica.
@@ -151,7 +271,7 @@ export async function importarHistorico({
         .map((m) => ({
           user_id: userId,
           id_conversa: idConversa,
-          id_whatsapp: m.id?._serialized ?? null,
+          id_whatsapp: m.id ?? null,
           direcao: m.fromMe ? "enviada" : "recebida",
           texto: textoDaMensagem(m),
           criado_em: new Date((m.timestamp ?? 0) * 1000).toISOString(),
