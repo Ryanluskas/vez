@@ -1,7 +1,8 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useRef } from "react";
 import { responderPendencia, type Resultado } from "@/lib/acoes-painel";
+import type { Atalho } from "@/lib/tipos";
 import { cn } from "@/lib/cn";
 
 /*
@@ -9,11 +10,31 @@ import { cn } from "@/lib/cn";
   só ele tem — e o motor embrulha isso numa mensagem no tom dele, que volta
   como rascunho pra aprovar. Ele nunca escreve a mensagem inteira aqui.
 */
-export function Responder({ idPendencia }: { idPendencia: string }) {
+export function Responder({
+  idPendencia,
+  atalhos,
+}: {
+  idPendencia: string;
+  atalhos: Atalho[];
+}) {
   const [estado, enviar, pendente] = useActionState(
     responderPendencia,
     {} as Resultado
   );
+  const campo = useRef<HTMLInputElement>(null);
+
+  /*
+    Atalho preenche, não envia. Um clique que dispara mensagem pro cliente
+    é fácil demais de errar com a mão — e aqui a mão está com pressa.
+    Depois de preencher, o cursor vai pro fim pra completar o número.
+  */
+  function usar(texto: string) {
+    const alvo = campo.current;
+    if (!alvo) return;
+    alvo.value = texto;
+    alvo.focus();
+    alvo.setSelectionRange(texto.length, texto.length);
+  }
 
   if (estado.ok) {
     return (
@@ -27,8 +48,28 @@ export function Responder({ idPendencia }: { idPendencia: string }) {
     <form action={enviar} className="mt-3">
       <input type="hidden" name="id" value={idPendencia} />
 
+      {atalhos.length > 0 ? (
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {atalhos.map((a) => (
+            <button
+              key={a.id}
+              type="button"
+              onClick={() => usar(a.texto)}
+              title={a.texto}
+              className={cn(
+                "rounded-full border border-fio bg-sup px-2.5 py-1 text-[11px] text-texto2",
+                "transition-colors hover:border-fio-forte hover:text-texto"
+              )}
+            >
+              {a.titulo}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       <div className="flex flex-col gap-2 sm:flex-row">
         <input
+          ref={campo}
           name="resposta"
           required
           autoComplete="off"

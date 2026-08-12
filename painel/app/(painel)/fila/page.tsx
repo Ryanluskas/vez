@@ -4,6 +4,7 @@ import { CabecalhoDeTela, Tela, Vazio } from "@/components/ui/Tela";
 import { ItemDaFila } from "@/components/fila/ItemDaFila";
 import { NOME_DA_TEMPERATURA, COR_DA_BORDA } from "@/components/fila/espera";
 import { criarClienteServidor } from "@/lib/supabase/servidor";
+import type { Atalho } from "@/lib/tipos";
 
 export const metadata: Metadata = { title: "Fila" };
 
@@ -24,14 +25,23 @@ export default async function PaginaDaFila() {
     nunca reordenado por nada. Quem esperou mais aparece primeiro.
     O RLS resolve o user_id: nao precisa (nem deve) filtrar aqui na mao.
   */
-  const { data, error } = await supabase
-    .from("pendencias")
-    .select("id, pergunta, contexto, motivo, criado_em, conversas(nome, telefone)")
-    .eq("status", "aberta")
-    .order("criado_em", { ascending: true })
-    .returns<LinhaDaFila[]>();
+  const [{ data, error }, listaDeAtalhos] = await Promise.all([
+    supabase
+      .from("pendencias")
+      .select("id, pergunta, contexto, motivo, criado_em, conversas(nome, telefone)")
+      .eq("status", "aberta")
+      .order("criado_em", { ascending: true })
+      .returns<LinhaDaFila[]>(),
+    supabase
+      .from("atalhos")
+      .select("id, titulo, texto, ordem")
+      .order("ordem")
+      .order("criado_em")
+      .returns<Atalho[]>(),
+  ]);
 
   const pendencias = data ?? [];
+  const atalhos = listaDeAtalhos.data ?? [];
   const agoraServidor = new Date().toISOString();
 
   return (
@@ -75,6 +85,7 @@ export default async function PaginaDaFila() {
                 pergunta={p.pergunta}
                 contexto={p.contexto}
                 motivo={p.motivo}
+                atalhos={atalhos}
               />
             ))}
           </div>

@@ -87,6 +87,14 @@ export type Rascunho = {
   criado_em: string;
 };
 
+/* Resposta curinga: clicar preenche a caixa da Fila, não envia. */
+export type Atalho = {
+  id: string;
+  titulo: string;
+  texto: string;
+  ordem: number;
+};
+
 export type RespostaBoa = {
   id: string;
   user_id: string;

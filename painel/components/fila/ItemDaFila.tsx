@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/cn";
 import { Responder } from "./Responder";
+import type { Atalho } from "@/lib/tipos";
 import {
   COR_DA_BORDA,
   COR_DO_TEXTO,
@@ -22,6 +23,7 @@ export type ItemDaFilaProps = {
   contexto: string | null;
   /* Por que essa conversa congelou, em portugues. */
   motivo: string | null;
+  atalhos: Atalho[];
 };
 
 export function ItemDaFila({
@@ -33,6 +35,7 @@ export function ItemDaFila({
   pergunta,
   contexto,
   motivo,
+  atalhos,
 }: ItemDaFilaProps) {
   const inicio = new Date(criadoEm).getTime();
   const [esperaMs, setEsperaMs] = useState(
@@ -90,7 +93,7 @@ export function ItemDaFila({
         </details>
       ) : null}
 
-      <Responder idPendencia={id} />
+      <Responder idPendencia={id} atalhos={atalhos} />
     </article>
   );
 }

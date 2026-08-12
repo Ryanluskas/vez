@@ -422,6 +422,105 @@ export async function apagarConexao(
 }
 
 /* ------------------------------------------------------------------
+   Atalhos — as respostas que você dá o dia inteiro
+------------------------------------------------------------------ */
+
+/*
+  O que o consultor de consignado repete todo dia. Ficam aqui e não no
+  banco de fábrica porque ele precisa poder editar e apagar cada um —
+  o "vou verificar" dele é diferente do de outro consultor.
+*/
+const ATALHOS_SUGERIDOS = [
+  { titulo: "Vou verificar", texto: "vou verificar agora e já te retorno" },
+  { titulo: "Sem margem", texto: "não tem margem disponível no momento" },
+  { titulo: "Banco negou", texto: "o banco não aprovou dessa vez" },
+  { titulo: "Em análise", texto: "já está em análise, assim que sair eu te aviso" },
+  {
+    titulo: "Pedir documentos",
+    texto:
+      "preciso de: documento com foto, comprovante de endereço, contracheque atualizado e agência/conta",
+  },
+  { titulo: "Valor liberado", texto: "R$ , em x de R$ " },
+];
+
+export async function criarAtalhosSugeridos(): Promise<Resultado> {
+  let usuario;
+  try {
+    usuario = await exigirLogin();
+  } catch (e) {
+    return { erro: (e as Error).message };
+  }
+
+  const supabase = await criarClienteServidor();
+  const { error } = await supabase.from("atalhos").insert(
+    ATALHOS_SUGERIDOS.map((a, i) => ({
+      user_id: usuario.id,
+      titulo: a.titulo,
+      texto: a.texto,
+      ordem: i,
+    }))
+  );
+
+  if (error) return { erro: `Não consegui criar: ${error.message}` };
+
+  revalidatePath("/meu-jeito");
+  revalidatePath("/fila");
+  return { ok: true };
+}
+
+export async function criarAtalho(
+  _anterior: Resultado,
+  dados: FormData
+): Promise<Resultado> {
+  const titulo = texto(dados, "titulo").slice(0, 30);
+  const conteudo = texto(dados, "texto").slice(0, 500);
+
+  if (!titulo) return { erro: "Dê um nome curto pro atalho." };
+  if (!conteudo) return { erro: "Escreva o texto do atalho." };
+
+  let usuario;
+  try {
+    usuario = await exigirLogin();
+  } catch (e) {
+    return { erro: (e as Error).message };
+  }
+
+  const supabase = await criarClienteServidor();
+  const { error } = await supabase
+    .from("atalhos")
+    .insert({ user_id: usuario.id, titulo, texto: conteudo, ordem: 99 });
+
+  if (error) return { erro: `Não consegui salvar: ${error.message}` };
+
+  revalidatePath("/meu-jeito");
+  revalidatePath("/fila");
+  return { ok: true };
+}
+
+export async function apagarAtalho(
+  _anterior: Resultado,
+  dados: FormData
+): Promise<Resultado> {
+  const id = texto(dados, "id");
+  if (!id) return { erro: "Atalho não identificado." };
+
+  try {
+    await exigirLogin();
+  } catch (e) {
+    return { erro: (e as Error).message };
+  }
+
+  const supabase = await criarClienteServidor();
+  const { error } = await supabase.from("atalhos").delete().eq("id", id);
+
+  if (error) return { erro: `Não consegui apagar: ${error.message}` };
+
+  revalidatePath("/meu-jeito");
+  revalidatePath("/fila");
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------
    Meu jeito — apagar um exemplo que o bot não deveria imitar
 ------------------------------------------------------------------ */
 
