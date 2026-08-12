@@ -270,6 +270,20 @@ export function criarFluxo(supabase, userId) {
         return;
       }
 
+      /*
+        Cliente ansioso manda tres mensagens em dois segundos. As tres leem
+        o estagio ANTES de a primeira congelar a conversa, entao as tres
+        passavam pelo teste acima e rodavam classificacao completa — tres
+        chamadas de IA numa maquina que atende uma por vez, e as duas
+        ultimas estouravam o tempo limite esperando.
+
+        Perguntar direto ao banco custa uma consulta e economiza minutos.
+      */
+      if (await jaTemPendenciaAberta(conversa.id)) {
+        log.info("Já tem pendência aberta nessa conversa; não classifiquei de novo.");
+        return;
+      }
+
       const contexto = await contextoDaConversa(conversa.id);
       const { categoria, precisaDoRyan, motivo, decidiuNaRegra } = await classificar({
         texto,

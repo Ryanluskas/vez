@@ -33,6 +33,30 @@ export async function ollamaVivo() {
   }
 }
 
+/*
+  ============================================================================
+  UMA GERACAO DE CADA VEZ
+
+  O Ollama roda no processador e atende uma requisicao por vez. Cliente
+  manda tres mensagens seguidas — coisa comum — e o motor disparava tres
+  classificacoes juntas: a primeira rodava, a segunda e a terceira ficavam
+  esperando na fila do Ollama e estouravam o tempo limite SEM NUNCA TEREM
+  COMECADO. No log aparecia "demorou demais" tres vezes, e tudo caia na
+  fila do consultor.
+
+  A fila abaixo garante que o relogio de cada chamada so comeca quando ela
+  realmente comeca. Espera-se na fila, nao se perde nela.
+  ============================================================================
+*/
+let ultimaDaFila = Promise.resolve();
+
+function naFila(tarefa) {
+  const minhaVez = ultimaDaFila.then(tarefa, tarefa);
+  // A fila nao pode morrer por causa de uma tarefa que falhou.
+  ultimaDaFila = minhaVez.catch(() => {});
+  return minhaVez;
+}
+
 /* Confere se o modelo foi baixado. Erro cedo e melhor que erro no cliente. */
 export async function modeloDisponivel() {
   try {
@@ -54,7 +78,13 @@ export async function modeloDisponivel() {
   NUNCA lanca excecao: quem chama decide o que fazer com o null, e a decisao
   em todo lugar deste produto e a mesma — na duvida, manda pra fila.
 */
-export async function gerar({ prompt, sistema, json = false, temperatura = 0.3 }) {
+export async function gerar(opcoes) {
+  // Entra na fila. O relogio de 90s so comeca quando chegar a vez dela.
+  return naFila(() => gerarAgora(opcoes));
+}
+
+async function gerarAgora({ prompt, sistema, json = false, temperatura = 0.3 }) {
+  const inicio = Date.now();
   try {
     const r = await fetch(`${ENDERECO}/api/generate`, {
       method: "POST",
@@ -82,7 +112,11 @@ export async function gerar({ prompt, sistema, json = false, temperatura = 0.3 }
     const dados = await r.json();
     return (dados.response ?? "").trim() || null;
   } catch (erro) {
-    const motivo = erro.name === "TimeoutError" ? "demorou demais" : erro.message;
+    const segundos = Math.round((Date.now() - inicio) / 1000);
+    const motivo =
+      erro.name === "TimeoutError"
+        ? `desistiu depois de ${segundos}s`
+        : erro.message;
     log.erro(`Ollama falhou (${motivo}). Mandando pra fila.`);
     return null;
   }
