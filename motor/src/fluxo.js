@@ -121,6 +121,34 @@ export function criarFluxo(supabase, userId) {
     return exemplosComBase(data, categoria, EXEMPLOS_NO_PROMPT);
   }
 
+  /*
+    O que o bot sabe sobre a operacao. Entra em todo prompt, entao vale
+    guardar por alguns minutos em vez de consultar o banco a cada mensagem —
+    isso muda uma vez por mes, nao uma vez por segundo.
+  */
+  let manualGuardado = null;
+  let manualEm = 0;
+  const VALIDADE_DO_MANUAL = 5 * 60 * 1000;
+
+  async function manualDaOperacao() {
+    if (manualGuardado !== null && Date.now() - manualEm < VALIDADE_DO_MANUAL) {
+      return manualGuardado;
+    }
+
+    const { data, error } = await supabase
+      .from("conhecimento")
+      .select("assunto, conteudo")
+      .order("ordem")
+      .order("criado_em");
+
+    // Tabela ainda nao criada: segue sem manual, sem derrubar nada.
+    manualGuardado = error
+      ? ""
+      : (data ?? []).map((f) => `${f.assunto}: ${f.conteudo}`).join("\n");
+    manualEm = Date.now();
+    return manualGuardado;
+  }
+
   async function jaTemPendenciaAberta(idConversa) {
     const { count } = await supabase
       .from("pendencias")
@@ -310,6 +338,7 @@ export function criarFluxo(supabase, userId) {
         nomeCliente,
         contexto,
         exemplos,
+        manual: await manualDaOperacao(),
       });
 
       // O bot achou que sabia, mas na hora de escrever nao soube sem chutar.
@@ -349,6 +378,7 @@ export function criarFluxo(supabase, userId) {
         respostaDoConsultor: pendencia.resposta,
         nomeCliente: conversa?.nome,
         exemplos,
+        manual: await manualDaOperacao(),
       });
 
       await abrirRascunho({

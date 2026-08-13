@@ -521,6 +521,157 @@ export async function apagarAtalho(
 }
 
 /* ------------------------------------------------------------------
+   Conhecimento — o que o bot sabe sobre a sua operação
+------------------------------------------------------------------ */
+
+/*
+  Valor, taxa e parcela mudam por cliente. Se entrassem aqui, o bot passaria
+  a citá-los sozinho — furando a regra de ouro por uma porta lateral, porque
+  isto vira contexto fixo de todo prompt.
+
+  CNPJ, CEP e número de endereço passam: são fatos da empresa, não do
+  contrato de ninguém.
+*/
+const CHEIRO_DE_DINHEIRO = [
+  { padrao: /r\$/i, o_que: "valor em reais" },
+  { padrao: /\d\s*%/, o_que: "taxa" },
+  { padrao: /\b\d{1,3}\s*x\b/i, o_que: "número de parcelas" },
+  { padrao: /\b\d+,\d{2}\b/, o_que: "valor quebrado" },
+  { padrao: /\b(parcela|prestação|juros|taxa de)\s+de\s+\d/i, o_que: "valor de parcela" },
+];
+
+function temNumeroQueMudaPorCliente(conteudo: string) {
+  for (const { padrao, o_que } of CHEIRO_DE_DINHEIRO) {
+    if (padrao.test(conteudo)) return o_que;
+  }
+  return null;
+}
+
+const CONHECIMENTO_SUGERIDO = [
+  {
+    assunto: "Quem somos",
+    conteudo:
+      "Somos a Capital Cred, correspondente bancário em Goiânia (GO). Instagram @capitalcred_ofc, site capitalcredgyn.com. Endereço: Rua Francisca C, 425, Setor Aeroporto, Goiânia GO, 74075-300. CNPJ 53.093.082/0001-22.",
+  },
+  {
+    assunto: "Para quem trabalhamos",
+    conteudo:
+      "Crédito consignado para aposentados e pensionistas do INSS e para servidores públicos. Trabalhamos com bancos como Santander e Caixa.",
+  },
+  {
+    assunto: "O que é a redução de taxa",
+    conteudo:
+      "Pegamos os contratos de consignado que o cliente já tem e fazemos a portabilidade com uma taxa de juros menor. A diferença entre a taxa antiga e a nova gera uma folga, e é essa folga que vira dinheiro liberado na conta dele.",
+  },
+  {
+    assunto: "O prazo aumenta — sempre dizer",
+    conteudo:
+      "Na maioria das operações o prazo do contrato se alonga, e é exatamente isso que permite derrubar a taxa e liberar o valor sem pesar na parcela mensal. Sempre dizer isso ao cliente. Nunca afirmar que 'não muda nada' se o prazo aumenta: cliente que descobre depois vira reclamação e cancelamento.",
+  },
+  {
+    assunto: "Refinanciamento",
+    conteudo:
+      "No refinanciamento a contagem de parcelas do contrato recomeça do zero, mas o que o cliente paga por mês continua igual ao que ele já pagava, com a taxa reduzida.",
+  },
+  {
+    assunto: "Documentos necessários",
+    conteudo:
+      "Documento com foto, comprovante de endereço, contracheque atualizado e a agência e conta do banco. Para conferir a margem, pedimos o extrato de margem (Consig Fácil).",
+  },
+  {
+    assunto: "Prazo de pagamento",
+    conteudo:
+      "Depois de aprovado, o dinheiro costuma cair na conta em até 2 dias úteis. O contrato passa por análise do banco antes disso.",
+  },
+  {
+    assunto: "Quando não sai",
+    conteudo:
+      "O banco pode negar por política de crédito própria, ou o CPF pode ter alguma restrição que limita o valor. Isso é análise interna do banco e não dá para contestar.",
+  },
+];
+
+export async function criarConhecimentoSugerido(): Promise<Resultado> {
+  let usuario;
+  try {
+    usuario = await exigirLogin();
+  } catch (e) {
+    return { erro: (e as Error).message };
+  }
+
+  const supabase = await criarClienteServidor();
+  const { error } = await supabase.from("conhecimento").insert(
+    CONHECIMENTO_SUGERIDO.map((c, i) => ({
+      user_id: usuario.id,
+      assunto: c.assunto,
+      conteudo: c.conteudo,
+      ordem: i,
+    }))
+  );
+
+  if (error) return { erro: `Não consegui criar: ${error.message}` };
+
+  revalidatePath("/meu-jeito");
+  return { ok: true };
+}
+
+export async function criarConhecimento(
+  _anterior: Resultado,
+  dados: FormData
+): Promise<Resultado> {
+  const assunto = texto(dados, "assunto").slice(0, 60);
+  const conteudo = texto(dados, "conteudo").slice(0, 1200);
+
+  if (!assunto) return { erro: "Dê um assunto pro fato." };
+  if (!conteudo) return { erro: "Escreva o que o bot precisa saber." };
+
+  const cheiro = temNumeroQueMudaPorCliente(conteudo);
+  if (cheiro) {
+    return {
+      erro: `Isso tem ${cheiro}, e valor muda por cliente. Se ficar aqui, o bot passa a dizer esse número pra todo mundo. Escreva sem o número.`,
+    };
+  }
+
+  let usuario;
+  try {
+    usuario = await exigirLogin();
+  } catch (e) {
+    return { erro: (e as Error).message };
+  }
+
+  const supabase = await criarClienteServidor();
+  const { error } = await supabase
+    .from("conhecimento")
+    .insert({ user_id: usuario.id, assunto, conteudo, ordem: 99 });
+
+  if (error) return { erro: `Não consegui salvar: ${error.message}` };
+
+  revalidatePath("/meu-jeito");
+  return { ok: true };
+}
+
+export async function apagarConhecimento(
+  _anterior: Resultado,
+  dados: FormData
+): Promise<Resultado> {
+  const id = texto(dados, "id");
+  if (!id) return { erro: "Fato não identificado." };
+
+  try {
+    await exigirLogin();
+  } catch (e) {
+    return { erro: (e as Error).message };
+  }
+
+  const supabase = await criarClienteServidor();
+  const { error } = await supabase.from("conhecimento").delete().eq("id", id);
+
+  if (error) return { erro: `Não consegui apagar: ${error.message}` };
+
+  revalidatePath("/meu-jeito");
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------
    Meu jeito — apagar um exemplo que o bot não deveria imitar
 ------------------------------------------------------------------ */
 

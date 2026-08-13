@@ -186,6 +186,23 @@ Nunca antes das 8h nem depois das 20h, nunca em conversa silenciada, e **nunca e
 quem está esperando você responder** — cobrar alguém que aguarda um número seu é o
 pior tipo de follow-up que existe.
 
+## O que o bot sabe, e o que ele copia
+
+São duas coisas diferentes, e ficam nas duas metades da tela **Meu jeito**:
+
+- **Meu jeito** (`respostas_boas`) — exemplos de **como** você fala. Alimenta o
+  few-shot: o bot lê 2 ou 3 da mesma categoria antes de escrever.
+- **O que o bot sabe** (`conhecimento`) — fatos sobre **o que é verdade** na sua
+  operação: que empresa é, com que bancos trabalha, como funciona a redução de taxa,
+  que documentos pedir. Entra como contexto fixo em todo prompt.
+
+O conhecimento **recusa valor, taxa e parcela** na hora de salvar. Esses números
+mudam por cliente; se ficassem no contexto fixo, o bot passaria a dizê-los para todo
+mundo — furando a regra de ouro por uma porta lateral.
+
+CNPJ e endereço passam: são fatos da empresa, não do contrato de ninguém. É o que
+permite ao bot responder *"isso não é golpe?"*, que é das objeções mais comuns.
+
 ## O ciclo completo
 
 ```

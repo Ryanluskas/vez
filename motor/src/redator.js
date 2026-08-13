@@ -47,7 +47,16 @@ function montarExemplos(exemplos) {
   um modelo de 3B pode alucinar um "R$ 5.000". Se o texto gerado tocar em
   dinheiro, o rascunho e descartado e a conversa vai pra fila.
 */
-function seguro(texto, { permitirNumeros = false } = {}) {
+/* O manual entra antes de tudo: o modelo lê o contexto e depois a tarefa. */
+function montarManual(manual) {
+  if (!manual?.trim()) return "";
+  return (
+    `\nO QUE VOCÊ SABE SOBRE A SUA OPERAÇÃO — use como verdade, ` +
+    `e não afirme nada que não esteja aqui:\n\n${manual.trim()}\n`
+  );
+}
+
+function seguro(texto, { permitirNumeros = false, manual = "" } = {}) {
   if (!texto) return false;
 
   /*
@@ -66,11 +75,20 @@ function seguro(texto, { permitirNumeros = false } = {}) {
   if (permitirNumeros) return true;
 
   const { travou, motivo } = checarGatilhos(texto);
-  if (travou) {
-    log.alerta(`Rascunho descartado: a IA escreveu sobre valor (${motivo}).`);
-    return false;
+  if (!travou) return true;
+
+  /*
+    Travou so por causa de um numero, e todo numero do texto veio do manual
+    que o consultor escreveu? Entao e fato da empresa, nao valor de cliente.
+    E o caso do CNPJ: sem esta excecao o bot nunca conseguiria responder
+    "isso nao e golpe?", que e das objecoes mais comuns do ramo.
+  */
+  if (motivo === "citou um numero grande" && manual) {
+    if (conferir(texto, manual).length === 0) return true;
   }
-  return true;
+
+  log.alerta(`Rascunho descartado: a IA escreveu sobre valor (${motivo}).`);
+  return false;
 }
 
 /*
@@ -82,9 +100,13 @@ export async function escreverResposta({
   nomeCliente,
   contexto,
   exemplos,
+  manual = "",
 }) {
   const texto = await gerar({
-    sistema: `Você é o próprio consultor de crédito consignado respondendo seu cliente no WhatsApp. Escreva na primeira pessoa, como ele escreveria.\n\n${REGRA_DE_OURO}`,
+    sistema:
+      `Você é o próprio consultor de crédito consignado respondendo seu cliente no WhatsApp. Escreva na primeira pessoa, como ele escreveria.\n` +
+      montarManual(manual) +
+      `\n${REGRA_DE_OURO}`,
     prompt:
       `${montarExemplos(exemplos)}\n` +
       (contexto ? `Conversa até agora:\n${contexto}\n\n` : "") +
@@ -92,7 +114,7 @@ export async function escreverResposta({
     temperatura: 0.4,
   });
 
-  return seguro(texto) ? texto : null;
+  return seguro(texto, { manual }) ? texto : null;
 }
 
 /*
@@ -107,11 +129,13 @@ export async function escreverComResposta({
   respostaDoConsultor,
   nomeCliente,
   exemplos,
+  manual = "",
 }) {
   const texto = await gerar({
     sistema:
-      `Você é o próprio consultor de crédito consignado respondendo seu cliente no WhatsApp. Escreva na primeira pessoa, como ele escreveria.\n\n` +
-      `O DADO abaixo foi conferido pelo consultor no sistema do banco. Copie os números dele EXATAMENTE como estão escritos. Não arredonde, não recalcule, não acrescente nenhum número novo, não converta formato.\n\n` +
+      `Você é o próprio consultor de crédito consignado respondendo seu cliente no WhatsApp. Escreva na primeira pessoa, como ele escreveria.\n` +
+      montarManual(manual) +
+      `\nO DADO abaixo foi conferido pelo consultor no sistema do banco. Copie os números dele EXATAMENTE como estão escritos. Não arredonde, não recalcule, não acrescente nenhum número novo, não converta formato.\n\n` +
       `Seu trabalho não é repetir o dado: é entregar a notícia como gente. Chame o cliente pelo nome, diga o que conseguiu, e termine oferecendo o próximo passo.\n\n` +
       REGRA_DE_OURO,
     prompt:
@@ -142,7 +166,9 @@ export async function escreverComResposta({
     simulacao pegou o modelo transformando "parcela de 210" em
     "210x de R$ 29,90" — inventando o 29,90 no meio do caminho.
   */
-  const inventados = conferir(texto, respostaDoConsultor, mensagemCliente);
+  // O manual entra como fonte permitida: CNPJ e afins sao fatos da empresa,
+  // nao numeros inventados no meio da conversa.
+  const inventados = conferir(texto, respostaDoConsultor, mensagemCliente, manual);
   if (inventados.length) {
     log.alerta(
       `Rascunho recusado: a IA inventou ${inventados.join(", ")}. Usando a sua resposta como está.`

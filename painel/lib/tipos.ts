@@ -87,6 +87,17 @@ export type Rascunho = {
   criado_em: string;
 };
 
+/*
+  Fato sobre a operação. Diferente de RespostaBoa: lá é COMO falar,
+  aqui é O QUE é verdade. Nunca contém valor, taxa ou parcela.
+*/
+export type Conhecimento = {
+  id: string;
+  assunto: string;
+  conteudo: string;
+  ordem: number;
+};
+
 /* Resposta curinga: clicar preenche a caixa da Fila, não envia. */
 export type Atalho = {
   id: string;
