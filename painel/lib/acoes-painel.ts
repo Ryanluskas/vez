@@ -521,6 +521,64 @@ export async function apagarAtalho(
 }
 
 /* ------------------------------------------------------------------
+   Modo autônomo — o que sai sem passar por você
+------------------------------------------------------------------ */
+
+/*
+  "valor" não está aqui e nunca vai estar. É a última barreira antes do
+  envio, depois da regra rígida, do redator e da conferência de números —
+  cada camada assume que a anterior falhou.
+*/
+export const CATEGORIAS_LIBERAVEIS = [
+  { chave: "saudacao", nome: "Saudação e agradecimento", exemplo: "“bom dia”, “obrigado”" },
+  { chave: "documentos", nome: "Documentos", exemplo: "“quais papéis preciso?”" },
+  { chave: "prazo", nome: "Prazos", exemplo: "“quanto tempo demora?”" },
+  { chave: "horario", nome: "Horário", exemplo: "“você atende sábado?”" },
+  { chave: "acompanhamento", nome: "Acompanhamento e objeção", exemplo: "“e aí, saiu?”, “vou pensar”" },
+  { chave: "elegibilidade", nome: "Se pode fazer, qual banco", exemplo: "“você trabalha com INSS?”" },
+  { chave: "outro", nome: "Não classificado", exemplo: "o que a IA não soube encaixar" },
+] as const;
+
+export async function salvarModoAutonomo(
+  _anterior: Resultado,
+  dados: FormData
+): Promise<Resultado> {
+  const ligado = dados.get("ligado") === "on";
+  const escolhidas = dados
+    .getAll("categoria")
+    .map(String)
+    .filter((c) => CATEGORIAS_LIBERAVEIS.some((x) => x.chave === c));
+
+  let usuario;
+  try {
+    usuario = await exigirLogin();
+  } catch (e) {
+    return { erro: (e as Error).message };
+  }
+
+  if (ligado && escolhidas.length === 0) {
+    return { erro: "Marque pelo menos um assunto, senão ligar não muda nada." };
+  }
+
+  const supabase = await criarClienteServidor();
+  const { error } = await supabase.from("preferencias").upsert(
+    {
+      user_id: usuario.id,
+      modo_autonomo: ligado,
+      categorias: escolhidas,
+      atualizado_em: new Date().toISOString(),
+    },
+    { onConflict: "user_id" }
+  );
+
+  if (error) return { erro: `Não consegui salvar: ${error.message}` };
+
+  revalidatePath("/conta");
+  revalidatePath("/rascunhos");
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------
    Conhecimento — o que o bot sabe sobre a sua operação
 ------------------------------------------------------------------ */
 

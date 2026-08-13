@@ -2,13 +2,21 @@ import type { Metadata } from "next";
 import { CabecalhoDeTela, Tela } from "@/components/ui/Tela";
 import { Botao } from "@/components/ui/Botao";
 import { TrocaDeTema } from "@/components/conta/TrocaDeTema";
-import { usuarioAtual } from "@/lib/supabase/servidor";
+import { ModoAutonomo } from "@/components/conta/ModoAutonomo";
+import { usuarioAtual, criarClienteServidor } from "@/lib/supabase/servidor";
 import { sair } from "@/lib/acoes";
 
 export const metadata: Metadata = { title: "Conta" };
 
 export default async function PaginaDaConta() {
-  const usuario = await usuarioAtual();
+  const supabase = await criarClienteServidor();
+  const [usuario, prefs] = await Promise.all([
+    usuarioAtual(),
+    supabase
+      .from("preferencias")
+      .select("modo_autonomo, categorias")
+      .maybeSingle(),
+  ]);
 
   return (
     <Tela>
@@ -30,7 +38,32 @@ export default async function PaginaDaConta() {
         </Linha>
       </dl>
 
-      <form action={sair} className="mt-8">
+      {prefs.error ? (
+        <section className="mt-10 border-t border-fio pt-7">
+          <h2 className="font-display text-[18px] font-bold tracking-[-0.02em]">
+            Modo autônomo
+          </h2>
+          <p className="mt-2 text-[13px] leading-relaxed text-texto2">
+            Rode <code className="num text-texto">banco/13_autonomo.sql</code> no SQL
+            Editor do Supabase para usar esta parte.
+          </p>
+        </section>
+      ) : (
+        <ModoAutonomo
+          ligadoInicial={prefs.data?.modo_autonomo ?? false}
+          categoriasIniciais={
+            prefs.data?.categorias ?? [
+              "saudacao",
+              "documentos",
+              "prazo",
+              "horario",
+              "acompanhamento",
+            ]
+          }
+        />
+      )}
+
+      <form action={sair} className="mt-10">
         <Botao tom="perigo" type="submit">
           Sair desta conta
         </Botao>

@@ -192,18 +192,60 @@ export function criarFluxo(supabase, userId) {
     return data.id;
   }
 
+  /*
+    Modo autonomo. Guardado por alguns minutos como o manual: muda raramente
+    e seria uma consulta por mensagem.
+  */
+  let prefsGuardadas = null;
+  let prefsEm = 0;
+
+  async function preferencias() {
+    if (prefsGuardadas && Date.now() - prefsEm < VALIDADE_DO_MANUAL) {
+      return prefsGuardadas;
+    }
+
+    const { data, error } = await supabase
+      .from("preferencias")
+      .select("modo_autonomo, categorias")
+      .maybeSingle();
+
+    // Tabela nao criada ou linha inexistente: modo aprovacao, o seguro.
+    prefsGuardadas =
+      error || !data ? { modo_autonomo: false, categorias: [] } : data;
+    prefsEm = Date.now();
+    return prefsGuardadas;
+  }
+
+  /*
+    Pode sair sem passar por voce?
+
+    'valor' NUNCA, mesmo que apareca na lista — e a ultima barreira antes do
+    envio, depois da regra rigida, do redator e da conferencia de numeros.
+    Defesa em profundidade: cada camada assume que a anterior falhou.
+  */
+  async function podeSairSozinho(categoria) {
+    if (categoria === "valor") return false;
+    const p = await preferencias();
+    return p.modo_autonomo && (p.categorias ?? []).includes(categoria);
+  }
+
   async function abrirRascunho({ idConversa, texto, categoria, idPendencia = null }) {
+    const automatico = await podeSairSozinho(categoria);
+
     const { error } = await supabase.from("rascunhos").insert({
       user_id: userId,
       id_conversa: idConversa,
       texto_sugerido: texto,
       categoria,
       id_pendencia: idPendencia,
-      status: "pendente",
+      // Aprovado de saida: a escuta pega e envia no proximo ciclo.
+      status: automatico ? "aprovado" : "pendente",
+      automatico,
     });
 
     if (error) throw new Error(`abrir rascunho: ${error.message}`);
     await mudarEstagio(idConversa, "rascunho_pronto");
+    return automatico;
   }
 
   return {
@@ -355,8 +397,17 @@ export function criarFluxo(supabase, userId) {
         return;
       }
 
-      await abrirRascunho({ idConversa: conversa.id, texto: rascunho, categoria });
-      log.info(`→ rascunho  ${nomeCliente ?? ""} · ${categoria}`);
+      const sozinho = await abrirRascunho({
+        idConversa: conversa.id,
+        texto: rascunho,
+        categoria,
+      });
+
+      log.info(
+        sozinho
+          ? `→ RESPONDENDO  ${nomeCliente ?? ""} · ${categoria} · sem passar por você`
+          : `→ rascunho  ${nomeCliente ?? ""} · ${categoria}`
+      );
     },
 
     /*

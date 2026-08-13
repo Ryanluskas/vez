@@ -63,7 +63,7 @@ export function criarEscuta({ supabase, fluxo, maestro, userId }) {
   async function varrerRascunhosAprovados() {
     const { data, error } = await supabase
       .from("rascunhos")
-      .select("id, id_conversa, id_pendencia, texto_sugerido, categoria")
+      .select("id, id_conversa, id_pendencia, texto_sugerido, categoria, automatico")
       .eq("status", "aprovado")
       .is("enviado_em", null)
       .order("criado_em", { ascending: true })
@@ -144,9 +144,13 @@ export function criarEscuta({ supabase, fluxo, maestro, userId }) {
       log.info(`${conversa.nome ?? conversa.telefone} agora está esperando documentos.`);
     }
 
-    // Fase 5: so vira exemplo o que realmente saiu. Rascunho descartado
-    // nao ensina nada, e rascunho aprovado que falhou no envio tambem nao.
-    await guardarExemplo(rascunho, conversa);
+    /*
+      So vira exemplo o que realmente saiu E passou pelos seus olhos.
+      Mensagem automatica nao ensina: aprender com texto que ninguem
+      conferiu compoe erro em cima de erro, e a cada rodada o bot ficaria
+      mais parecido com a propria versao ruim de si mesmo.
+    */
+    if (!rascunho.automatico) await guardarExemplo(rascunho, conversa);
   }
 
   async function guardarExemplo(rascunho, conversa) {
