@@ -20,6 +20,7 @@ const FILTROS = [
   { chave: "conversando", nome: "Conversando", campo: "etapa", valor: "conversando" },
   { chave: "travadas", nome: "Travadas com você", campo: "estagio", valor: "aguardando_voce" },
   { chave: "fechado", nome: "Fechados", campo: "etapa", valor: "fechado" },
+  { chave: "comigo", nome: "Comigo", campo: "so_voce", valor: true },
   { chave: "silenciadas", nome: "Silenciadas", campo: "atender", valor: false },
 ] as const;
 
@@ -36,7 +37,7 @@ export default async function PaginaDeConversas({
   let consulta = supabase
     .from("conversas")
     .select(
-      "id, telefone, nome, estagio, etapa, ultima_mensagem, atualizado_em, atender, seguir, followups_enviados, ultima_direcao"
+      "id, telefone, nome, estagio, etapa, ultima_mensagem, atualizado_em, atender, seguir, followups_enviados, ultima_direcao, so_voce"
     )
     .order("atualizado_em", { ascending: false })
     .limit(100);
@@ -118,6 +119,9 @@ export default async function PaginaDeConversas({
                   {c.estagio === "aguardando_voce" && c.atender ? (
                     <span className="text-[11px] text-brasa">travada com você</span>
                   ) : null}
+                  {c.so_voce && c.atender ? (
+                    <span className="text-[11px] text-brasa">só com você</span>
+                  ) : null}
                   {!c.atender ? (
                     <span className="text-[11px] text-texto3">silenciado</span>
                   ) : null}
@@ -133,6 +137,7 @@ export default async function PaginaDeConversas({
                 etapa={c.etapa}
                 seguir={c.seguir}
                 atendendo={c.atender}
+                soVoce={c.so_voce ?? false}
                 followups={c.followups_enviados ?? 0}
               />
             </article>

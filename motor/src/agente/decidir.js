@@ -40,6 +40,14 @@ export const ACOES = {
 const MONOLOGO_MAXIMO = 3;
 
 /*
+  Quantas vezes a mesma conversa pode ir parar na mão do consultor antes de
+  o bot admitir que não vai resolver aquilo. Na quarta, o caso não é de
+  informação faltando — ou o cliente quer algo que a operação não faz, ou
+  tem ruído que só gente desfaz. Insistir vira ping-pong entre bot e humano.
+*/
+const ESCALONAMENTOS_MAXIMOS = 3;
+
+/*
   Quão determinística foi a decisão.
     1.00 regra rígida — não passou por modelo nenhum
     0.90 estado da conversa — congelada, silenciada, pendência aberta
@@ -84,6 +92,19 @@ export function decidir(retrato) {
     };
   }
 
+  /*
+    ---- 1b. Conversa que você assumiu ----
+    O freio de loop pegou aqui antes (ou você assumiu na mão). O bot grava
+    e não decide mais nada nesta conversa até você devolver no painel.
+  */
+  if (conversa.soVoce) {
+    return {
+      acao: ACOES.AGUARDAR,
+      confianca: CONFIANCA.ESTADO,
+      motivo: "esta conversa está com você; só gravei",
+    };
+  }
+
   /* ---- 2. A bola já está com o consultor ---- */
   if (conversa.estagio === "aguardando_voce" || conversa.temPendenciaAberta) {
     return {
@@ -107,6 +128,23 @@ export function decidir(retrato) {
       confianca: CONFIANCA.ESTADO,
       motivo: `mandei ${monologo} mensagens seguidas sem resposta`,
       escalonamento: "sem_resposta",
+    };
+  }
+
+  /*
+    ---- 3b. Freio do ping-pong ----
+    Já foi pra sua mão três vezes e voltou. O bot para de tentar e entrega
+    a conversa: continua gravando tudo, mas não decide mais nada sozinho
+    ali. É diferente de silenciar — silenciado é quem não é cliente; este
+    é cliente demais.
+  */
+  if ((conversa.escalonamentos ?? 0) >= ESCALONAMENTOS_MAXIMOS) {
+    return {
+      acao: ACOES.PEDIR_AO_CONSULTOR,
+      confianca: CONFIANCA.ESTADO,
+      motivo: `já passou ${conversa.escalonamentos}x por você sem resolver — assuma esta`,
+      escalonamento: "loop",
+      assumirManual: true,
     };
   }
 

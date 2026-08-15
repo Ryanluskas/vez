@@ -23,6 +23,11 @@ export type Conversa = {
   followups_enviados: number;
   /* Quem falou por último. 'recebida' = a bola está com você. */
   ultima_direcao: "recebida" | "enviada" | null;
+  /*
+    true = o bot só grava aqui. Ligado sozinho quando a mesma conversa volta
+    três vezes pra sua mão sem sair do lugar; desligado só por você.
+  */
+  so_voce?: boolean;
 };
 
 /*

@@ -45,7 +45,7 @@ export function criarFluxo(supabase, userId) {
   }) {
     const { data: existente, error: erroDaBusca } = await supabase
       .from("conversas")
-      .select("id, nome, estagio, atender, etapa, seguir, id_chat")
+      .select("id, nome, estagio, atender, etapa, seguir, id_chat, escalonamentos, so_voce")
       .eq("telefone", telefone)
       .eq("id_conexao", idConexao)
       .maybeSingle();
@@ -66,7 +66,7 @@ export function criarFluxo(supabase, userId) {
           ultima_direcao: direcao ?? null,
           atualizado_em: new Date().toISOString(),
         })
-        .select("id, nome, estagio, atender, etapa, seguir")
+        .select("id, nome, estagio, atender, etapa, seguir, escalonamentos, so_voce")
         .single();
 
       if (error) throw new Error(`criar conversa: ${error.message}`);
@@ -341,8 +341,25 @@ export function criarFluxo(supabase, userId) {
     );
   }
 
-  async function abrirRascunho({ idConversa, texto, categoria, idPendencia = null }) {
-    const automatico = await podeSairSozinho(categoria);
+  async function abrirRascunho({
+    idConversa,
+    texto,
+    categoria,
+    idPendencia = null,
+    origem = "bot",
+    confianca = 1,
+  }) {
+    /*
+      Rascunho nascido de uma resposta SUA sai sem segunda aprovação: você
+      já aprovou quando respondeu na Fila. Pedir duas confirmações pro mesmo
+      dado é exatamente o atrito que faz largar a ferramenta.
+
+      O que segura a segurança aqui não é a aprovação — é a conferência de
+      procedência lá no redator: todo número do texto tem que estar na sua
+      resposta, senão o rascunho é recusado e sai o seu texto cru.
+    */
+    const automatico =
+      origem === "consultor" ? true : await podeSairSozinho(categoria, confianca);
 
     const { error } = await supabase.from("rascunhos").insert({
       user_id: userId,
@@ -352,7 +369,11 @@ export function criarFluxo(supabase, userId) {
       id_pendencia: idPendencia,
       // Aprovado de saida: a escuta pega e envia no proximo ciclo.
       status: automatico ? "aprovado" : "pendente",
-      automatico,
+      // "automatico" = saiu sem ninguem ler. Resposta do consultor sai
+      // sozinha mas NAO e automatica: ele leu o caso e deu o dado. Por isso
+      // ela vira exemplo em "Meu jeito" e a do bot nao.
+      automatico: automatico && origem === "bot",
+      origem,
     });
 
     if (error) throw new Error(`abrir rascunho: ${error.message}`);
@@ -475,7 +496,9 @@ export function criarFluxo(supabase, userId) {
         estouravam o tempo esperando a primeira.
       */
       const travada =
-        conversa.estagio === "aguardando_voce" || temPendencia;
+        conversa.estagio === "aguardando_voce" ||
+        temPendencia ||
+        conversa.so_voce === true;
 
       const contexto = await contextoDaConversa(conversa.id);
 
@@ -500,7 +523,13 @@ export function criarFluxo(supabase, userId) {
       /* ---- 2. decidir ---- */
 
       const decisao = decidir({
-        conversa: { ...conversa, temPendenciaAberta: temPendencia },
+        // A decisão fala camelCase; o banco fala snake_case. A tradução é
+        // aqui, no único lugar onde as duas se encontram.
+        conversa: {
+          ...conversa,
+          temPendenciaAberta: temPendencia,
+          soVoce: conversa.so_voce === true,
+        },
         memoria: lembrado,
         classificacao,
         ultimasMensagens,
@@ -547,7 +576,7 @@ export function criarFluxo(supabase, userId) {
       }
 
       if (decisao.acao === ACOES.PEDIR_AO_CONSULTOR) {
-        await abrirPendencia({
+        const abriu = await abrirPendencia({
           idConversa: conversa.id,
           pergunta: texto,
           contexto,
@@ -555,6 +584,26 @@ export function criarFluxo(supabase, userId) {
           motivo: decisao.motivo,
           memoria: lembrado,
         });
+
+        // Conta só quando de fato criou uma pendência nova: o freio do
+        // ping-pong mede casos, não mensagens repetidas do mesmo cliente.
+        if (abriu) {
+          await supabase
+            .from("conversas")
+            .update({
+              escalonamentos: (conversa.escalonamentos ?? 0) + 1,
+              // O freio pegou: a conversa passa a ser sua até você devolver.
+              ...(decisao.assumirManual ? { so_voce: true } : {}),
+            })
+            .eq("id", conversa.id);
+        }
+
+        if (decisao.assumirManual) {
+          log.alerta(
+            `${nomeCliente ?? "Cliente"} já voltou pra você ${conversa.escalonamentos}x. ` +
+              `Assumi que o bot não resolve esta: ele só grava daqui, até você devolver em Conversas.`
+          );
+        }
         log.destaque(
           `→ FILA  ${nomeCliente ?? ""} · ${decisao.motivo}` +
             (decisao.confianca === 1 ? " (regra rígida)" : "")
@@ -630,9 +679,28 @@ export function criarFluxo(supabase, userId) {
         texto,
         categoria: pendencia.categoria ?? "outro",
         idPendencia: pendencia.id,
+        origem: "consultor",
       });
 
-      log.destaque(`Rascunho pronto para ${conversa?.nome ?? "cliente"}. Aprove no painel.`);
+      /*
+        Você respondeu, então a conversa volta a andar sozinha. O contador
+        de escalonamentos zera aqui: o caso ANDOU. Ele só cresce quando a
+        mesma conversa volta pra sua mão sem ter saído do lugar.
+      */
+      await supabase
+        .from("conversas")
+        .update({ escalonamentos: 0 })
+        .eq("id", pendencia.id_conversa);
+
+      await memoria.registrarAcao(
+        pendencia.id_conversa,
+        "retomou_apos_consultor",
+        "você respondeu; segui sozinho daqui"
+      );
+
+      log.destaque(
+        `↩ Retomando ${conversa?.nome ?? "cliente"} com o que você respondeu. Sai sem esperar aprovação.`
+      );
     },
 
     /*

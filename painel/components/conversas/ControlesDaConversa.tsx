@@ -5,6 +5,7 @@ import {
   mudarEtapa,
   alternarSeguimento,
   alternarAtendimento,
+  devolverAoBot,
   type Resultado,
 } from "@/lib/acoes-painel";
 import { ETAPAS, ROTULO_DA_ETAPA, type Etapa } from "@/lib/tipos";
@@ -20,6 +21,7 @@ export function ControlesDaConversa({
   etapa,
   seguir,
   atendendo,
+  soVoce = false,
   followups,
 }: {
   id: string;
@@ -27,15 +29,35 @@ export function ControlesDaConversa({
   etapa: Etapa;
   seguir: boolean;
   atendendo: boolean;
+  soVoce?: boolean;
   followups: number;
 }) {
   const [, salvarEtapa] = useActionState(mudarEtapa, {} as Resultado);
   const [, salvarSeguir] = useActionState(alternarSeguimento, {} as Resultado);
   const [, salvarAtender] = useActionState(alternarAtendimento, {} as Resultado);
+  const [, salvarDevolucao] = useActionState(devolverAoBot, {} as Resultado);
   const formEtapa = useRef<HTMLFormElement>(null);
 
   return (
     <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+      {/*
+        Só aparece quando o freio pegou. É o único jeito de destravar: o
+        motor liga sozinho e nunca desliga, porque quem sabe se o caso
+        andou é você.
+      */}
+      {soVoce && atendendo ? (
+        <form action={salvarDevolucao}>
+          <input type="hidden" name="id" value={id} />
+          <button
+            type="submit"
+            title={`O bot volta a decidir em ${nome}. O contador de idas e vindas zera.`}
+            className="rounded-md px-2 py-1 text-[11px] whitespace-nowrap text-jade transition-colors hover:bg-sup"
+          >
+            Devolver ao bot
+          </button>
+        </form>
+      ) : null}
+
       {atendendo ? (
         <form action={salvarEtapa} ref={formEtapa}>
           <input type="hidden" name="id" value={id} />

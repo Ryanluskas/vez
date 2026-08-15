@@ -134,6 +134,22 @@ async function checarBanco(ambiente) {
   }
   ok("Colunas das Fases 3-5 no lugar");
 
+  /*
+    O motor lê estas duas em toda mensagem recebida. Sem elas o erro que
+    aparece é do PostgREST, com nome de coluna e nada mais — e quem está
+    lendo o log não tem como adivinhar qual arquivo rodar.
+  */
+  const { error: erroHandoff } = await supabase
+    .from("conversas")
+    .select("escalonamentos, so_voce")
+    .limit(1);
+
+  if (erroHandoff) {
+    falha("faltam as colunas do handoff", "Rode banco/16_handoff.sql no SQL Editor");
+    return null;
+  }
+  ok("Colunas do handoff no lugar");
+
   return supabase;
 }
 

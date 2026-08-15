@@ -206,6 +206,45 @@ export async function alternarAtendimento(
 }
 
 /* ------------------------------------------------------------------
+   Conversas — devolver ao bot uma conversa que travou na sua mão
+
+   O motor liga `so_voce` sozinho quando a mesma conversa volta pra você
+   três vezes sem sair do lugar. Ele nunca desliga: quem decide que o caso
+   destravou é você. Sem este botão, a proteção contra loop seria uma
+   conversa presa para sempre.
+------------------------------------------------------------------ */
+
+export async function devolverAoBot(
+  _anterior: Resultado,
+  dados: FormData
+): Promise<Resultado> {
+  const id = texto(dados, "id");
+  if (!id) return { erro: "Conversa não identificada." };
+
+  try {
+    await exigirLogin();
+  } catch (e) {
+    return { erro: (e as Error).message };
+  }
+
+  const supabase = await criarClienteServidor();
+
+  /*
+    Zerar o contador junto é obrigatório. Devolver sem zerar faria o freio
+    pegar de novo na primeira dúvida, e o botão pareceria quebrado.
+  */
+  const { error } = await supabase
+    .from("conversas")
+    .update({ so_voce: false, escalonamentos: 0 })
+    .eq("id", id);
+
+  if (error) return { erro: `Não consegui devolver: ${error.message}` };
+
+  revalidatePath("/conversas");
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------
    Conversas — mover no funil e ligar/desligar a cobrança
 ------------------------------------------------------------------ */
 
