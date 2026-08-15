@@ -1,7 +1,9 @@
 import { classificar } from "./classificar.js";
 import { escreverResposta, escreverComResposta, escreverPedido } from "./redator.js";
 import { criarMemoria } from "./memoria.js";
-import { montarPedido, REQUISITOS } from "./requisitos.js";
+import { REQUISITOS } from "./requisitos.js";
+import { decidir, podeAgirSozinho, ACOES } from "./agente/decidir.js";
+import { validarDecisao } from "./agente/validar.js";
 import { exemplosComBase } from "./estilo.js";
 import { log } from "./log.js";
 
@@ -251,14 +253,34 @@ export function criarFluxo(supabase, userId) {
 
     const { data, error } = await supabase
       .from("preferencias")
-      .select("modo_autonomo, categorias")
+      .select("modo, modo_autonomo, categorias")
       .maybeSingle();
 
-    // Tabela nao criada ou linha inexistente: modo aprovacao, o seguro.
-    prefsGuardadas =
-      error || !data ? { modo_autonomo: false, categorias: [] } : data;
+    // Tabela nao criada ou linha inexistente: modo manual, o seguro.
+    if (error || !data) {
+      prefsGuardadas = { modo: "manual", categorias: [] };
+    } else {
+      prefsGuardadas = {
+        // Banco sem o 15_modos ainda: deriva do interruptor antigo.
+        modo: data.modo ?? (data.modo_autonomo ? "autonomo" : "manual"),
+        categorias: data.categorias ?? [],
+      };
+    }
+
     prefsEm = Date.now();
     return prefsGuardadas;
+  }
+
+  /* Últimas mensagens só com a direção: é o que o anti-loop precisa. */
+  async function ultimasDirecoes(idConversa) {
+    const { data } = await supabase
+      .from("mensagens")
+      .select("direcao")
+      .eq("id_conversa", idConversa)
+      .order("criado_em", { ascending: false })
+      .limit(6);
+
+    return (data ?? []).reverse();
   }
 
   /*
@@ -268,10 +290,12 @@ export function criarFluxo(supabase, userId) {
     envio, depois da regra rigida, do redator e da conferencia de numeros.
     Defesa em profundidade: cada camada assume que a anterior falhou.
   */
-  async function podeSairSozinho(categoria) {
-    if (categoria === "valor") return false;
+  async function podeSairSozinho(categoria, confianca = 1) {
     const p = await preferencias();
-    return p.modo_autonomo && (p.categorias ?? []).includes(categoria);
+    return podeAgirSozinho(
+      { categoria, confianca },
+      { modo: p.modo, categoriasLiberadas: p.categorias }
+    );
   }
 
   /*
@@ -415,38 +439,43 @@ export function criarFluxo(supabase, userId) {
       Ordem: congelada? -> classifica -> ou abre pendencia, ou escreve rascunho.
       Todo caminho de erro cai na fila. Nenhum caminho manda mensagem sozinho.
     */
+    /*
+      ====================================================================
+      O ORQUESTRADOR
+
+      Antes isto era uma escada de if/else. Agora tem três tempos separados:
+
+        1. montar o retrato   — estado, memória, classificação, histórico
+        2. decidir            — agente/decidir.js, função pura, testada
+        3. executar           — só depois de o validador aprovar
+
+      Separar importa porque a decisão passou a ser testável sem WhatsApp,
+      sem banco e sem IA: 19 testes cobrem os caminhos, incluindo os que
+      quase nunca acontecem em produção e por isso ninguém descobre a tempo.
+      ====================================================================
+    */
     async processarRecebida(conversa, texto, nomeCliente) {
-      /*
-        Silenciada na mao pelo consultor: nao e cliente. A mensagem ja foi
-        gravada la em cima — o historico nunca se perde — mas o cerebro nao
-        roda. E o unico jeito honesto de separar cliente de mae, porque pro
-        WhatsApp os dois sao o mesmo tipo de contato.
-      */
+      /* ---- 1. retrato ---- */
+
+      // Silenciada: nem gasta consulta. O resto do retrato não importa.
       if (conversa.atender === false) {
         log.info(`${nomeCliente ?? "contato"} está silenciado. Só gravei.`);
         return;
       }
 
-      // Conversa congelada esperando o consultor: nao mexe. O cliente pode
-      // mandar mais dez mensagens; elas ficam gravadas e o bot fica quieto.
-      if (conversa.estagio === "aguardando_voce") {
-        log.info("Conversa congelada esperando você. Bot não respondeu.");
-        return;
-      }
+      const [temPendencia, ultimasMensagens] = await Promise.all([
+        jaTemPendenciaAberta(conversa.id),
+        ultimasDirecoes(conversa.id),
+      ]);
 
       /*
-        Cliente ansioso manda tres mensagens em dois segundos. As tres leem
-        o estagio ANTES de a primeira congelar a conversa, entao as tres
-        passavam pelo teste acima e rodavam classificacao completa — tres
-        chamadas de IA numa maquina que atende uma por vez, e as duas
-        ultimas estouravam o tempo limite esperando.
-
-        Perguntar direto ao banco custa uma consulta e economiza minutos.
+        Só classifica se a conversa está de fato livre. Classificar custa
+        segundos de CPU: cliente ansioso mandando três mensagens gerava três
+        chamadas de IA que a máquina atende uma por vez, e as duas últimas
+        estouravam o tempo esperando a primeira.
       */
-      if (await jaTemPendenciaAberta(conversa.id)) {
-        log.info("Já tem pendência aberta nessa conversa; não classifiquei de novo.");
-        return;
-      }
+      const travada =
+        conversa.estagio === "aguardando_voce" || temPendencia;
 
       const contexto = await contextoDaConversa(conversa.id);
 
@@ -456,59 +485,86 @@ export function criarFluxo(supabase, userId) {
         precisa ser interpretado de novo.
       */
       let lembrado = await memoria.garantir(conversa.id);
+
+      // Mesmo travada, vale aprender: o cliente pode ter dito o banco dele
+      // enquanto esperava você. Extrair é barato e não gera ação nenhuma.
       const novosFatos = await memoria.extrairDaMensagem(texto, lembrado);
       if (Object.values(novosFatos).some(Boolean)) {
         lembrado = await memoria.aprender(conversa.id, novosFatos);
       }
 
-      const { categoria, precisaDoRyan, motivo, decidiuNaRegra } = await classificar({
-        texto,
-        contexto,
+      const classificacao = travada
+        ? null
+        : await classificar({ texto, contexto });
+
+      /* ---- 2. decidir ---- */
+
+      const decisao = decidir({
+        conversa: { ...conversa, temPendenciaAberta: temPendencia },
+        memoria: lembrado,
+        classificacao,
+        ultimasMensagens,
       });
 
-      if (precisaDoRyan) {
+      const conferida = validarDecisao(decisao);
+      if (!conferida.ok) {
         /*
-          AQUI ESTÁ A MUDANÇA QUE FAZ O BOT TRABALHAR SOZINHO.
-
-          Antes, toda pergunta de dinheiro virava pendência na hora. Mas
-          "quanto libera?" sem contracheque na mão não é pergunta pro
-          consultor — é pergunta que ninguém pode responder ainda. Chamar
-          ele ali só transfere o trabalho de pedir documento.
-
-          Agora: se falta informação do CLIENTE, o bot pede ao cliente. Só
-          quando estiver tudo na mão é que o consultor entra — e aí entra
-          para fazer a única coisa que só ele faz, que é a simulação.
-
-          Isso não fura a regra de ouro: o que sai é uma pergunta, sem
-          número nenhum, e passa pelas mesmas validações de sempre.
+          Decisão malformada é bug, não caso de negócio. Não dá pra executar
+          e não dá pra ignorar — o cliente ficaria sem resposta e ninguém
+          saberia. Vai pro consultor com o defeito escrito.
         */
-        const pedido = montarPedido(lembrado);
-
-        if (pedido) {
-          await pedirAoCliente({
-            conversa,
-            nomeCliente,
-            pedido,
-            contexto,
-            porque: texto,
-          });
-          return;
-        }
-
+        log.erro(`Decisão inválida: ${conferida.problemas.join(", ")}`);
         await abrirPendencia({
           idConversa: conversa.id,
           pergunta: texto,
           contexto,
-          categoria,
-          motivo,
+          categoria: "outro",
+          motivo: "erro interno ao decidir",
           memoria: lembrado,
         });
-        await memoria.registrarAcao(conversa.id, "ask_human", motivo);
+        return;
+      }
+
+      await memoria.registrarAcao(conversa.id, decisao.acao, decisao.motivo);
+
+      /* ---- 3. executar ---- */
+
+      if (decisao.acao === ACOES.SILENCIAR || decisao.acao === ACOES.AGUARDAR) {
+        log.info(`· ${nomeCliente ?? ""} — ${decisao.motivo}`);
+        return;
+      }
+
+      if (decisao.acao === ACOES.PERGUNTAR_CLIENTE) {
+        await pedirAoCliente({
+          conversa,
+          nomeCliente,
+          pedido: decisao.pedido,
+          contexto,
+          porque: texto,
+          confianca: decisao.confianca,
+        });
+        return;
+      }
+
+      if (decisao.acao === ACOES.PEDIR_AO_CONSULTOR) {
+        await abrirPendencia({
+          idConversa: conversa.id,
+          pergunta: texto,
+          contexto,
+          categoria: decisao.categoria ?? "outro",
+          motivo: decisao.motivo,
+          memoria: lembrado,
+        });
         log.destaque(
-          `→ FILA  ${nomeCliente ?? ""} · ${motivo}${decidiuNaRegra ? " (regra rígida)" : ""}`
+          `→ FILA  ${nomeCliente ?? ""} · ${decisao.motivo}` +
+            (decisao.confianca === 1 ? " (regra rígida)" : "")
         );
         return;
       }
+
+      /* ACOES.RESPONDER — o único caminho que gera texto pro cliente. */
+      const categoria = decisao.categoria;
+
 
       const exemplos = await exemplosDaCategoria(categoria);
       const rascunho = await escreverResposta({

@@ -539,11 +539,33 @@ export const CATEGORIAS_LIBERAVEIS = [
   { chave: "outro", nome: "Não classificado", exemplo: "o que a IA não soube encaixar" },
 ] as const;
 
+export const MODOS = [
+  {
+    chave: "manual",
+    nome: "Manual",
+    resumo: "Tudo espera sua aprovação em Rascunhos.",
+  },
+  {
+    chave: "assistido",
+    nome: "Assistido",
+    resumo:
+      "Sai sozinho o que foi decidido por regra; o que dependeu de palpite da IA espera você.",
+  },
+  {
+    chave: "autonomo",
+    nome: "Autônomo",
+    resumo: "Sai sozinho sempre que o assunto estiver liberado abaixo.",
+  },
+] as const;
+
 export async function salvarModoAutonomo(
   _anterior: Resultado,
   dados: FormData
 ): Promise<Resultado> {
-  const ligado = dados.get("ligado") === "on";
+  const modo = texto(dados, "modo") || "manual";
+  if (!MODOS.some((m) => m.chave === modo)) return { erro: "Modo desconhecido." };
+
+  const ligado = modo !== "manual";
   const escolhidas = dados
     .getAll("categoria")
     .map(String)
@@ -564,6 +586,9 @@ export async function salvarModoAutonomo(
   const { error } = await supabase.from("preferencias").upsert(
     {
       user_id: usuario.id,
+      modo,
+      // Espelho da coluna antiga: o motor lê `modo`, mas quem ainda ler
+      // `modo_autonomo` continua vendo a verdade.
       modo_autonomo: ligado,
       categorias: escolhidas,
       atualizado_em: new Date().toISOString(),

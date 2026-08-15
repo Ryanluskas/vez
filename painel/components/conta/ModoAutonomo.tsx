@@ -4,6 +4,7 @@ import { useActionState, useState } from "react";
 import {
   salvarModoAutonomo,
   CATEGORIAS_LIBERAVEIS,
+  MODOS,
   type Resultado,
 } from "@/lib/acoes-painel";
 import { cn } from "@/lib/cn";
@@ -17,56 +18,56 @@ import { cn } from "@/lib/cn";
   sair sozinha. Por isso "valor" nem aparece na lista abaixo.
 */
 export function ModoAutonomo({
-  ligadoInicial,
+  modoInicial,
   categoriasIniciais,
 }: {
-  ligadoInicial: boolean;
+  modoInicial: string;
   categoriasIniciais: string[];
 }) {
   const [estado, salvar, salvando] = useActionState(
     salvarModoAutonomo,
     {} as Resultado
   );
-  const [ligado, setLigado] = useState(ligadoInicial);
+  const [modo, setModo] = useState(modoInicial);
+  const ligado = modo !== "manual";
 
   return (
     <form action={salvar} className="mt-10 border-t border-fio pt-7">
       <h2 className="font-display text-[18px] font-bold tracking-[-0.02em]">
-        Modo autônomo
+        Como o bot trabalha
       </h2>
       <p className="mt-1.5 text-[13px] leading-relaxed text-texto2">
-        Com isto ligado, o bot responde sozinho os assuntos que você marcar — sem
-        esperar sua aprovação. O que envolve valor, parcela, saldo ou taxa continua
-        indo para a Fila, sempre. Isso não muda e não tem como desligar.
+        O que envolve valor, parcela, saldo ou taxa vai para a Fila em qualquer modo.
+        Isso não muda e não tem como desligar.
       </p>
 
-      <label className="mt-4 flex cursor-pointer items-center gap-3">
-        <input
-          type="checkbox"
-          name="ligado"
-          checked={ligado}
-          onChange={(e) => setLigado(e.target.checked)}
-          className="peer sr-only"
-        />
-        <span
-          aria-hidden="true"
-          className={cn(
-            "relative h-5 w-9 shrink-0 rounded-full transition-colors",
-            ligado ? "bg-jade" : "bg-sup2",
-            "peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-jade peer-focus-visible:outline-offset-2"
-          )}
-        >
-          <span
-            className={cn(
-              "absolute top-0.5 h-4 w-4 rounded-full bg-texto transition-[left]",
-              ligado ? "left-[18px]" : "left-0.5"
-            )}
-          />
-        </span>
-        <span className="text-[14px] text-texto">
-          {ligado ? "Respondendo sozinho" : "Tudo espera sua aprovação"}
-        </span>
-      </label>
+      <div className="mt-4 flex flex-col gap-2.5">
+        {MODOS.map((m) => (
+          <label key={m.chave} className="flex cursor-pointer items-start gap-2.5">
+            <input
+              type="radio"
+              name="modo"
+              value={m.chave}
+              checked={modo === m.chave}
+              onChange={() => setModo(m.chave)}
+              className="mt-1 h-3.5 w-3.5 shrink-0 accent-jade"
+            />
+            <span className="min-w-0">
+              <span
+                className={cn(
+                  "text-[14px]",
+                  modo === m.chave ? "text-texto" : "text-texto2"
+                )}
+              >
+                {m.nome}
+              </span>
+              <span className="block text-[12px] leading-relaxed text-texto3">
+                {m.resumo}
+              </span>
+            </span>
+          </label>
+        ))}
+      </div>
 
       <fieldset
         disabled={!ligado}

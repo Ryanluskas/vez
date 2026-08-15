@@ -14,7 +14,7 @@ export default async function PaginaDaConta() {
     usuarioAtual(),
     supabase
       .from("preferencias")
-      .select("modo_autonomo, categorias")
+      .select("modo, modo_autonomo, categorias")
       .maybeSingle(),
   ]);
 
@@ -44,13 +44,15 @@ export default async function PaginaDaConta() {
             Modo autônomo
           </h2>
           <p className="mt-2 text-[13px] leading-relaxed text-texto2">
-            Rode <code className="num text-texto">banco/13_autonomo.sql</code> no SQL
+            Rode <code className="num text-texto">banco/15_modos.sql</code> no SQL
             Editor do Supabase para usar esta parte.
           </p>
         </section>
       ) : (
         <ModoAutonomo
-          ligadoInicial={prefs.data?.modo_autonomo ?? false}
+          modoInicial={
+            prefs.data?.modo ?? (prefs.data?.modo_autonomo ? "autonomo" : "manual")
+          }
           categoriasIniciais={
             prefs.data?.categorias ?? [
               "saudacao",
