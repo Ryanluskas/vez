@@ -1,4 +1,4 @@
-import { gerar } from "./ollama.js";
+import { escrever } from "./ia.js";
 import { checarGatilhos } from "./gatilhos.js";
 import { mascarar, conferir, sobrouMarcador } from "./numeros.js";
 import { log } from "./log.js";
@@ -92,6 +92,47 @@ function seguro(texto, { permitirNumeros = false, manual = "" } = {}) {
 }
 
 /*
+  Caso 3 — falta informação do CLIENTE, não do consultor.
+
+  O QUE pedir vem de requisitos.js, em código: o modelo não escolhe o
+  documento, ele só embrulha o pedido no tom certo. Se o modelo falhar,
+  quem chamou manda o pedido cru — que já é uma frase inteira e correta.
+
+  Nenhum número entra aqui, então esta é a única saída do redator que pode
+  responder a uma pergunta de dinheiro sem furar a regra de ouro: ela não
+  responde a pergunta, ela pede o que falta pra poder responder.
+*/
+export async function escreverPedido({
+  pedido,
+  mensagemCliente,
+  nomeCliente,
+  contexto,
+  exemplos,
+  manual = "",
+  memoria = "",
+}) {
+  const texto = await escrever({
+    sistema:
+      `Você é o próprio consultor de crédito consignado no WhatsApp. Escreva na primeira pessoa.\n` +
+      montarManual(manual) +
+      (memoria ? `\n${memoria}\n` : "") +
+      `\nO cliente perguntou algo que você só consegue responder depois de receber uma informação dele.\n` +
+      `Sua mensagem deve: reconhecer o que ele pediu, explicar em meia linha que você precisa disso para conseguir a resposta, e pedir.\n` +
+      `NÃO prometa valor, não diga que "vai dar certo", não estime nada.\n\n` +
+      REGRA_DE_OURO,
+    prompt:
+      `${montarExemplos(exemplos)}\n` +
+      (contexto ? `Conversa até agora:\n${contexto}\n\n` : "") +
+      `O cliente${nomeCliente ? ` (${nomeCliente})` : ""} disse: "${mensagemCliente}"\n\n` +
+      `O QUE VOCÊ PRECISA PEDIR, exatamente isto e nada além: "${pedido}"\n\n` +
+      `Escreva a mensagem de WhatsApp.`,
+    temperatura: 0.4,
+  });
+
+  return seguro(texto) ? texto : null;
+}
+
+/*
   Caso 1 — pergunta simples, que o bot da conta sozinho.
   Devolve o texto do rascunho, ou null se ele nao souber responder sem chutar.
 */
@@ -101,11 +142,13 @@ export async function escreverResposta({
   contexto,
   exemplos,
   manual = "",
+  memoria = "",
 }) {
-  const texto = await gerar({
+  const texto = await escrever({
     sistema:
       `Você é o próprio consultor de crédito consignado respondendo seu cliente no WhatsApp. Escreva na primeira pessoa, como ele escreveria.\n` +
       montarManual(manual) +
+      (memoria ? `\n${memoria}\nNunca pergunte de novo algo que já está aí.\n` : "") +
       `\n${REGRA_DE_OURO}`,
     prompt:
       `${montarExemplos(exemplos)}\n` +
@@ -130,11 +173,13 @@ export async function escreverComResposta({
   nomeCliente,
   exemplos,
   manual = "",
+  memoria = "",
 }) {
-  const texto = await gerar({
+  const texto = await escrever({
     sistema:
       `Você é o próprio consultor de crédito consignado respondendo seu cliente no WhatsApp. Escreva na primeira pessoa, como ele escreveria.\n` +
       montarManual(manual) +
+      (memoria ? `\n${memoria}\n` : "") +
       `\nO DADO abaixo foi conferido pelo consultor no sistema do banco. Copie os números dele EXATAMENTE como estão escritos. Não arredonde, não recalcule, não acrescente nenhum número novo, não converta formato.\n\n` +
       `Seu trabalho não é repetir o dado: é entregar a notícia como gente. Chame o cliente pelo nome, diga o que conseguiu, e termine oferecendo o próximo passo.\n\n` +
       REGRA_DE_OURO,

@@ -1,5 +1,7 @@
 import { classificar } from "./classificar.js";
-import { escreverResposta, escreverComResposta } from "./redator.js";
+import { escreverResposta, escreverComResposta, escreverPedido } from "./redator.js";
+import { criarMemoria } from "./memoria.js";
+import { montarPedido, REQUISITOS } from "./requisitos.js";
 import { exemplosComBase } from "./estilo.js";
 import { log } from "./log.js";
 
@@ -11,6 +13,17 @@ const TAMANHO_DO_CONTEXTO = 4;
 const EXEMPLOS_NO_PROMPT = 3;
 
 export function criarFluxo(supabase, userId) {
+  const memoria = criarMemoria(supabase, userId);
+
+  /* O bot mandou a lista de documentos: a bola passa pro cliente. */
+  async function marcarEsperandoDocumentos(idConversa) {
+    await supabase
+      .from("conversas")
+      .update({ etapa: "aguardando_documentos", followups_enviados: 0 })
+      .eq("id", idConversa)
+      .in("etapa", ["novo", "conversando"]);
+  }
+
   /* ------------------------------------------------------------------
      Conversa
   ------------------------------------------------------------------ */
@@ -163,7 +176,39 @@ export function criarFluxo(supabase, userId) {
      Escrita
   ------------------------------------------------------------------ */
 
-  async function abrirPendencia({ idConversa, pergunta, contexto, categoria, motivo }) {
+  /*
+    O consultor abre a Fila entre dois atendimentos. "Cliente precisa de
+    você" não serve: ele teria que abrir a conversa, ler tudo e reconstruir
+    o caso na cabeça. O que ele precisa é do dossiê pronto e da pergunta
+    exata — pra responder só o número e voltar ao que estava fazendo.
+  */
+  function montarDossie(memoriaDoCliente, contexto) {
+    const linhas = [];
+
+    if (memoriaDoCliente) {
+      const m = memoriaDoCliente;
+      if (m.convenio) linhas.push(`Convênio: ${m.convenio}`);
+      if (m.banco) linhas.push(`Banco: ${m.banco}`);
+      if (m.objetivo) linhas.push(`Quer: ${m.objetivo.replace(/_/g, " ")}`);
+
+      const entregues = Object.entries(m.coletado ?? {})
+        .filter(([, v]) => v?.confirmado)
+        .map(([k]) => REQUISITOS[k]?.rotulo ?? k);
+      if (entregues.length) linhas.push(`Já enviou: ${entregues.join(", ")}`);
+    }
+
+    const cabecalho = linhas.length ? `${linhas.join("\n")}\n\n` : "";
+    return `${cabecalho}${contexto ?? ""}`.trim() || null;
+  }
+
+  async function abrirPendencia({
+    idConversa,
+    pergunta,
+    contexto,
+    categoria,
+    motivo,
+    memoria: memoriaDoCliente = null,
+  }) {
     // Cliente ansioso manda tres mensagens seguidas. Isso e uma pessoa na
     // fila, nao tres — senao a ordem de chegada vira mentira.
     if (await jaTemPendenciaAberta(idConversa)) {
@@ -177,7 +222,7 @@ export function criarFluxo(supabase, userId) {
         user_id: userId,
         id_conversa: idConversa,
         pergunta,
-        contexto,
+        contexto: montarDossie(memoriaDoCliente, contexto),
         categoria,
         motivo,
         status: "aberta",
@@ -229,6 +274,49 @@ export function criarFluxo(supabase, userId) {
     return p.modo_autonomo && (p.categorias ?? []).includes(categoria);
   }
 
+  /*
+    Pede ao cliente o que falta. A mensagem é escrita pelo redator para sair
+    no tom do consultor, mas o CONTEÚDO do pedido vem de requisitos.js —
+    código, não modelo. Assim o bot nunca pede algo que já tem, nem inventa
+    um documento que a operação não usa.
+  */
+  async function pedirAoCliente({ conversa, nomeCliente, pedido, contexto, porque }) {
+    const lembrado = await memoria.ler(conversa.id);
+
+    const texto = await escreverPedido({
+      pedido: pedido.texto,
+      mensagemCliente: porque,
+      nomeCliente: lembrado?.nome ?? nomeCliente,
+      contexto,
+      exemplos: await exemplosDaCategoria("documentos"),
+      manual: await manualDaOperacao(),
+      memoria: memoria.emTexto(lembrado),
+    });
+
+    // Redator falhou: manda o pedido cru, que já é uma frase inteira.
+    const mensagem = texto ?? `Oi! Pra eu continuar, ${pedido.texto}.`;
+
+    await memoria.registrarPergunta(conversa.id, pedido.chaves);
+    await memoria.registrarAcao(
+      conversa.id,
+      "ask_customer",
+      `falta ${pedido.chaves.join(", ")}`
+    );
+
+    const sozinho = await abrirRascunho({
+      idConversa: conversa.id,
+      texto: mensagem,
+      categoria: "documentos",
+    });
+
+    await marcarEsperandoDocumentos(conversa.id);
+
+    log.destaque(
+      `→ ${sozinho ? "PEDINDO AO CLIENTE" : "rascunho de pedido"}  ` +
+        `${nomeCliente ?? ""} · falta ${pedido.chaves.join(", ")}`
+    );
+  }
+
   async function abrirRascunho({ idConversa, texto, categoria, idPendencia = null }) {
     const automatico = await podeSairSozinho(categoria);
 
@@ -250,7 +338,7 @@ export function criarFluxo(supabase, userId) {
 
   return {
     /* Grava a mensagem crua. Vale pros dois lados da conversa. */
-    async registrar({ idConexao, idChat, telefone, nome, texto, direcao }) {
+    async registrar({ idConexao, idChat, idMensagem, telefone, nome, texto, direcao }) {
       const conversa = await garantirConversa({
         idConexao,
         idChat,
@@ -263,9 +351,21 @@ export function criarFluxo(supabase, userId) {
       const { error } = await supabase.from("mensagens").insert({
         user_id: userId,
         id_conversa: conversa.id,
+        id_whatsapp: idMensagem ?? null,
         direcao,
         texto,
       });
+
+      /*
+        23505 = o indice unico em id_whatsapp barrou. O WhatsApp reentrega
+        evento — reconexao, aba recarregada, sincronia do celular — e sem
+        isto o bot responderia duas vezes a mesma pergunta. Quem chamou ve
+        `jaVista` e para aqui.
+      */
+      if (error?.code === "23505") {
+        log.info("Mensagem repetida do WhatsApp; ignorei.");
+        return { ...conversa, jaVista: true };
+      }
 
       if (error) throw new Error(`salvar mensagem: ${error.message}`);
 
@@ -306,14 +406,8 @@ export function criarFluxo(supabase, userId) {
       conversa.etapa = "documentos_recebidos";
     },
 
-    /* O bot mandou a lista de documentos: agora a bola esta com o cliente. */
-    async marcarEsperandoDocumentos(idConversa) {
-      await supabase
-        .from("conversas")
-        .update({ etapa: "aguardando_documentos", followups_enviados: 0 })
-        .eq("id", idConversa)
-        .in("etapa", ["novo", "conversando"]);
-    },
+    marcarEsperandoDocumentos,
+    memoria,
 
     /*
       O cerebro da Fase 3. Roda depois de gravar uma mensagem RECEBIDA.
@@ -355,19 +449,61 @@ export function criarFluxo(supabase, userId) {
       }
 
       const contexto = await contextoDaConversa(conversa.id);
+
+      /*
+        Lê a mensagem e guarda o que der: nome, convênio, banco, objetivo.
+        Só chama a IA se ainda falta algo — quem já disse que é do INSS não
+        precisa ser interpretado de novo.
+      */
+      let lembrado = await memoria.garantir(conversa.id);
+      const novosFatos = await memoria.extrairDaMensagem(texto, lembrado);
+      if (Object.values(novosFatos).some(Boolean)) {
+        lembrado = await memoria.aprender(conversa.id, novosFatos);
+      }
+
       const { categoria, precisaDoRyan, motivo, decidiuNaRegra } = await classificar({
         texto,
         contexto,
       });
 
       if (precisaDoRyan) {
+        /*
+          AQUI ESTÁ A MUDANÇA QUE FAZ O BOT TRABALHAR SOZINHO.
+
+          Antes, toda pergunta de dinheiro virava pendência na hora. Mas
+          "quanto libera?" sem contracheque na mão não é pergunta pro
+          consultor — é pergunta que ninguém pode responder ainda. Chamar
+          ele ali só transfere o trabalho de pedir documento.
+
+          Agora: se falta informação do CLIENTE, o bot pede ao cliente. Só
+          quando estiver tudo na mão é que o consultor entra — e aí entra
+          para fazer a única coisa que só ele faz, que é a simulação.
+
+          Isso não fura a regra de ouro: o que sai é uma pergunta, sem
+          número nenhum, e passa pelas mesmas validações de sempre.
+        */
+        const pedido = montarPedido(lembrado);
+
+        if (pedido) {
+          await pedirAoCliente({
+            conversa,
+            nomeCliente,
+            pedido,
+            contexto,
+            porque: texto,
+          });
+          return;
+        }
+
         await abrirPendencia({
           idConversa: conversa.id,
           pergunta: texto,
           contexto,
           categoria,
           motivo,
+          memoria: lembrado,
         });
+        await memoria.registrarAcao(conversa.id, "ask_human", motivo);
         log.destaque(
           `→ FILA  ${nomeCliente ?? ""} · ${motivo}${decidiuNaRegra ? " (regra rígida)" : ""}`
         );
@@ -377,10 +513,11 @@ export function criarFluxo(supabase, userId) {
       const exemplos = await exemplosDaCategoria(categoria);
       const rascunho = await escreverResposta({
         mensagemCliente: texto,
-        nomeCliente,
+        nomeCliente: lembrado?.nome ?? nomeCliente,
         contexto,
         exemplos,
         manual: await manualDaOperacao(),
+        memoria: memoria.emTexto(lembrado),
       });
 
       // O bot achou que sabia, mas na hora de escrever nao soube sem chutar.

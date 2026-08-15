@@ -267,6 +267,7 @@ export function criarWhatsApp({ conexao, estado, fluxo }) {
       const conversa = await fluxo.registrar({
         idConexao: conexao.id,
         idChat: idDoChat,
+        idMensagem: msg.id?._serialized ?? null,
         telefone,
         nome,
         texto,
@@ -284,6 +285,9 @@ export function criarWhatsApp({ conexao, estado, fluxo }) {
         proprio celular fica gravado, mas nao dispara classificacao — senao
         o bot responderia a si mesmo.
       */
+      // Evento reentregue pelo WhatsApp: ja foi tratado, nao trata de novo.
+      if (conversa.jaVista) return;
+
       if (msg.fromMe) return;
 
       /*
@@ -293,6 +297,9 @@ export function criarWhatsApp({ conexao, estado, fluxo }) {
       */
       if (msg.hasMedia && ARQUIVOS.has(msg.type) && conversa.atender !== false) {
         await fluxo.marcarDocumentoRecebido(conversa);
+        // Confirma na memoria o que foi pedido por ultimo: e o que o
+        // cliente acabou de mandar, e e o que impede o bot de pedir de novo.
+        await fluxo.memoria.confirmarPeloUltimoPedido(conversa.id);
         await avisarConsultor(cliente, `${avisoDeDocumento(conversa)} (${apelido})`);
         log.destaque(`[${apelido}] 📄 ${nome ?? telefone} mandou documento.`);
         return;

@@ -203,6 +203,42 @@ mundo — furando a regra de ouro por uma porta lateral.
 CNPJ e endereço passam: são fatos da empresa, não do contrato de ninguém. É o que
 permite ao bot responder *"isso não é golpe?"*, que é das objeções mais comuns.
 
+## Memória e perguntas mínimas
+
+O bot lembra de cada cliente: nome, convênio, banco, objetivo e quais documentos já
+chegaram. Guardado em `memoria`, uma linha por conversa.
+
+**Ele nunca pergunta duas vezes a mesma coisa.** O que falta é calculado em
+`motor/src/requisitos.js` — código, não IA: regra de negócio não é interpretação, e
+assim a lógica sobrevive a troca de modelo.
+
+A mudança que faz o bot trabalhar sozinho:
+
+| cliente pergunta | falta documento? | o bot |
+| --- | --- | --- |
+| "quanto libera?" | sim | **pede o documento ao cliente** |
+| "quanto libera?" | não | chama você, com o dossiê pronto |
+
+Antes, toda pergunta de dinheiro virava pendência na hora — mas "quanto libera?" sem
+contracheque na mão não é pergunta pra você, é pergunta que ninguém pode responder
+ainda. Isso não fura a regra de ouro: o que sai é uma pergunta, sem número nenhum.
+
+No máximo **dois pedidos por mensagem**, e ele desiste de pedir o que já pediu duas
+vezes — insistir na terceira não traz o documento, traz bloqueio.
+
+## Quem pensa e quem escreve
+
+Dois papéis, dois modelos, trocáveis por variável de ambiente:
+
+- **Pensar** (classificar, extrair fatos) — Ollama local. Vê a mensagem crua, inclusive
+  quando fala de dinheiro. Não sai da máquina.
+- **Escrever** (a mensagem que o cliente lê) — Groq, se `GROQ_API_KEY` estiver
+  configurada; senão o local. Sem chave tudo continua funcionando, só sai mais duro.
+
+**Nenhum dos dois é fonte de verdade para número.** Valor, parcela, saldo, margem e
+taxa vêm de você ou do banco de dados. A IA decide *como* responder, nunca *qual* é o
+dado — garantido em `gatilhos.js` (corta antes) e `numeros.js` (confere depois).
+
 ## O ciclo completo
 
 ```
