@@ -143,11 +143,22 @@ export async function escreverResposta({
   exemplos,
   manual = "",
   memoria = "",
+  consultas = "",
 }) {
+  /*
+    `consultas` é o que as ferramentas trouxeram para ESTA mensagem — o
+    trecho do manual que fala do assunto, o que ainda falta do cliente, o
+    aviso de que a simulação não está disponível.
+
+    Vem separado do manual porque é específico da pergunta: o manual é o
+    que sempre vale, isto é o que importa agora. O modelo pequeno presta
+    mais atenção no que está mais perto da tarefa.
+  */
   const texto = await escrever({
     sistema:
       `Você é o próprio consultor de crédito consignado respondendo seu cliente no WhatsApp. Escreva na primeira pessoa, como ele escreveria.\n` +
       montarManual(manual) +
+      (consultas ? `\nSOBRE ESTA PERGUNTA, especificamente:\n${consultas.trim()}\n` : "") +
       (memoria ? `\n${memoria}\nNunca pergunte de novo algo que já está aí.\n` : "") +
       `\n${REGRA_DE_OURO}`,
     prompt:
@@ -157,7 +168,12 @@ export async function escreverResposta({
     temperatura: 0.4,
   });
 
-  return seguro(texto, { manual }) ? texto : null;
+  /*
+    O que as consultas trouxeram conta como fonte permitida de número pelo
+    mesmo motivo que o manual conta: saiu da tabela `conhecimento`, que
+    quem escreveu foi o consultor. Nada aqui vem do modelo.
+  */
+  return seguro(texto, { manual: `${manual}\n${consultas}` }) ? texto : null;
 }
 
 /*

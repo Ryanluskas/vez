@@ -296,10 +296,12 @@ export function criarWhatsApp({ conexao, estado, fluxo }) {
         consultor, no WhatsApp dele, porque e la que ele vive.
       */
       if (msg.hasMedia && ARQUIVOS.has(msg.type) && conversa.atender !== false) {
+        /*
+          Move o funil E confirma na memoria o que foi pedido por ultimo —
+          as duas coisas numa ferramenta so, que nao repete se o WhatsApp
+          reentregar o mesmo arquivo.
+        */
         await fluxo.marcarDocumentoRecebido(conversa);
-        // Confirma na memoria o que foi pedido por ultimo: e o que o
-        // cliente acabou de mandar, e e o que impede o bot de pedir de novo.
-        await fluxo.memoria.confirmarPeloUltimoPedido(conversa.id);
         await avisarConsultor(cliente, `${avisoDeDocumento(conversa)} (${apelido})`);
         log.destaque(`[${apelido}] 📄 ${nome ?? telefone} mandou documento.`);
         return;

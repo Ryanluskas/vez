@@ -4,6 +4,8 @@ import { criarMemoria } from "./memoria.js";
 import { REQUISITOS } from "./requisitos.js";
 import { decidir, podeAgirSozinho, ACOES } from "./agente/decidir.js";
 import { validarDecisao } from "./agente/validar.js";
+import { criarExecutor } from "./agente/executor.js";
+import { planejarConsultas, consultasEmTexto } from "./agente/planejar.js";
 import { exemplosComBase } from "./estilo.js";
 import { log } from "./log.js";
 
@@ -381,7 +383,22 @@ export function criarFluxo(supabase, userId) {
     return automatico;
   }
 
+  /*
+    As ferramentas do agente. Elas recebem tudo que precisam por aqui —
+    nenhuma delas conhece o Supabase por conta própria, e é isso que faz
+    cada uma ser testável com um banco de mentira.
+  */
+  const executor = criarExecutor({
+    supabase,
+    userId,
+    memoria,
+    abrirPendencia,
+    contextoDaConversa,
+  });
+
   return {
+    executor,
+
     /* Grava a mensagem crua. Vale pros dois lados da conversa. */
     async registrar({ idConexao, idChat, idMensagem, telefone, nome, texto, direcao }) {
       const conversa = await garantirConversa({
@@ -439,14 +456,21 @@ export function criarFluxo(supabase, userId) {
       voltou pra ele.
     */
     async marcarDocumentoRecebido(conversa) {
-      await supabase
-        .from("conversas")
-        .update({
-          etapa: "documentos_recebidos",
-          followups_enviados: 0,
-          atualizado_em: new Date().toISOString(),
-        })
-        .eq("id", conversa.id);
+      const ciclo = executor.novoCiclo({ idConversa: conversa.id, quem: "documento" });
+
+      /*
+        Passa pela ferramenta em vez de escrever direto: assim chegar
+        arquivo duas vezes (o WhatsApp reentrega evento) não marca duas
+        vezes, e o que aconteceu fica registrado como qualquer outra ação.
+      */
+      const r = await ciclo.usar("registrar_documento_recebido", {
+        id_conversa: conversa.id,
+      });
+
+      if (!r.ok) {
+        log.erro(`Não consegui registrar o documento: ${r.erro}`);
+        return;
+      }
 
       conversa.etapa = "documentos_recebidos";
     },
@@ -509,11 +533,33 @@ export function criarFluxo(supabase, userId) {
       */
       let lembrado = await memoria.garantir(conversa.id);
 
+      /*
+        Um ciclo de ferramentas por mensagem. O limite e a proteção contra
+        repetição valem dentro dele: duas mensagens do mesmo cliente são
+        dois ciclos, e a segunda pode legitimamente refazer o que a
+        primeira fez.
+      */
+      const ciclo = executor.novoCiclo({
+        idConversa: conversa.id,
+        quem: nomeCliente ?? conversa.telefone,
+      });
+
       // Mesmo travada, vale aprender: o cliente pode ter dito o banco dele
       // enquanto esperava você. Extrair é barato e não gera ação nenhuma.
       const novosFatos = await memoria.extrairDaMensagem(texto, lembrado);
       if (Object.values(novosFatos).some(Boolean)) {
-        lembrado = await memoria.aprender(conversa.id, novosFatos);
+        /*
+          A extração é da IA; a gravação passa pela ferramenta. É ali que
+          um "banco: 4200" — que o modelo já tentou inventar em teste — é
+          barrado antes de virar memória do cliente.
+        */
+        const gravou = await ciclo.usar("atualizar_memoria", {
+          id_conversa: conversa.id,
+          ...Object.fromEntries(
+            Object.entries(novosFatos).filter(([, v]) => v)
+          ),
+        });
+        if (gravou.ok) lembrado = await memoria.ler(conversa.id);
       }
 
       const classificacao = travada
@@ -576,14 +622,27 @@ export function criarFluxo(supabase, userId) {
       }
 
       if (decisao.acao === ACOES.PEDIR_AO_CONSULTOR) {
-        const abriu = await abrirPendencia({
-          idConversa: conversa.id,
+        const chamada = await ciclo.usar("solicitar_intervencao", {
+          id_conversa: conversa.id,
           pergunta: texto,
-          contexto,
-          categoria: decisao.categoria ?? "outro",
           motivo: decisao.motivo,
-          memoria: lembrado,
+          categoria: decisao.categoria ?? "outro",
         });
+
+        /*
+          A ferramenta falhou (banco fora, tempo estourado). Não dá pra
+          engolir: o cliente perguntou algo que só você responde e ninguém
+          ficaria sabendo. Deixa a conversa esperando e grita no log.
+        */
+        if (!chamada.ok) {
+          log.erro(
+            `Não consegui pôr ${nomeCliente ?? "o cliente"} na fila: ${chamada.erro}`
+          );
+          await mudarEstagio(conversa.id, "aguardando_voce");
+          return;
+        }
+
+        const abriu = chamada.dados.id;
 
         // Conta só quando de fato criou uma pendência nova: o freio do
         // ping-pong mede casos, não mensagens repetidas do mesmo cliente.
@@ -614,6 +673,18 @@ export function criarFluxo(supabase, userId) {
       /* ACOES.RESPONDER — o único caminho que gera texto pro cliente. */
       const categoria = decisao.categoria;
 
+      /*
+        Aqui, e só aqui, o modelo escolhe ferramenta. Ele lê a mensagem e
+        diz o que precisa consultar pra responder — o trecho do manual que
+        fala do assunto, o que ainda falta do cliente.
+
+        Só leitura. Escrever é decidir, e decidir continua sendo do
+        `decidir.js`. E o id da conversa é preenchido pelo código: se
+        viesse do modelo, uma alucinação leria os dados de outro cliente.
+      */
+      const consultas = await ciclo.usarVarias(
+        await planejarConsultas({ texto, idConversa: conversa.id })
+      );
 
       const exemplos = await exemplosDaCategoria(categoria);
       const rascunho = await escreverResposta({
@@ -623,6 +694,7 @@ export function criarFluxo(supabase, userId) {
         exemplos,
         manual: await manualDaOperacao(),
         memoria: memoria.emTexto(lembrado),
+        consultas: consultasEmTexto(consultas),
       });
 
       // O bot achou que sabia, mas na hora de escrever nao soube sem chutar.
