@@ -76,6 +76,39 @@ const PARA_FECHAR = [
   "conta_bancaria",
 ];
 
+/*
+  ============================================================================
+  QUANDO O CONSULTOR ABORDOU PRIMEIRO, ELE JÁ SABE
+
+  Prospecção não é atendimento. O consultor procurou aquela pessoa PORQUE
+  já viu o contrato dela — o banco, a margem, a oportunidade. A abordagem
+  diz isso na cara: "vi que seu contrato Santander tem margem pra reduzir".
+
+  Pedir contracheque e extrato de margem nesse momento é conversa errada.
+  O cliente acabou de ouvir que você já analisou o caso dele, e a resposta
+  à primeira pergunta que ele faz é um pedido de papel. Ele conclui, com
+  razão, que você não olhou nada.
+
+  Na prospecção o próximo passo é a SIMULAÇÃO, que é sua. Documento vem
+  depois de ele querer seguir — e aí faz todo sentido.
+  ============================================================================
+*/
+const PARA_SIMULAR_EM_PROSPECCAO = [];
+
+function exigidosPara(para, estado) {
+  if (para === "fechar") return PARA_FECHAR;
+
+  /*
+    A etapa manda mais que a origem: se a negociação já chegou em
+    'documentos', é porque a simulação andou e agora papel é o assunto.
+  */
+  const emProspeccao =
+    estado?.origem === "prospeccao" &&
+    ["prospeccao", "interesse", "simulacao"].includes(estado?.etapa_comercial ?? "interesse");
+
+  return emProspeccao ? PARA_SIMULAR_EM_PROSPECCAO : PARA_SIMULAR;
+}
+
 /* Quantos pedidos cabem numa mensagem sem virar formulário. */
 const MAXIMO_POR_MENSAGEM = 2;
 
@@ -121,7 +154,11 @@ export function semRotulosDeRequisito(texto) {
   mandar comprovante de endereço.
 */
 export function queFalta(memoria, { para = "simular" } = {}) {
-  const exigidos = para === "fechar" ? PARA_FECHAR : PARA_SIMULAR;
+  /*
+    A memoria carrega a etapa comercial junto. Quem abordou primeiro ja
+    sabe o basico do cliente — pedir de novo e a conversa errada.
+  */
+  const exigidos = exigidosPara(para, memoria);
   return exigidos
     .filter((chave) => !jaTem(memoria, chave))
     .sort((a, b) => REQUISITOS[a].peso - REQUISITOS[b].peso);

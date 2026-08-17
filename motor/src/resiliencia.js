@@ -61,10 +61,22 @@ export function ehPassageiro(erro) {
 
   const m = String(erro.message ?? erro).toLowerCase();
 
+  /*
+    Limite de uso NÃO se resolve tentando de novo no mesmo segundo.
+
+    Medido: o Groq devolve 429 quando o teto de tokens por minuto estoura,
+    e a retentativa imediata levava outro 429 — duas chamadas queimadas pra
+    chegar no mesmo lugar, com o cliente esperando as duas.
+
+    O caminho certo já existe e é o de baixo: cai pro modelo local. Insistir
+    no serviço que acabou de dizer "você passou do limite" só atrasa isso.
+  */
+  if (/\b429\b|rate limit|limite de uso|too many requests|quota/.test(m)) return false;
+
   // Erros de rede, tempo e indisponibilidade. Estes voltam.
   if (/econnrefused|econnreset|etimedout|enotfound|enetunreach|socket hang up/.test(m)) return true;
   if (/timeout|tempo|hibern|temporar|unavailable|indispon/.test(m)) return true;
-  if (/\b(?:429|500|502|503|504)\b/.test(m)) return true;
+  if (/\b(?:500|502|503|504)\b/.test(m)) return true;
   if (/fetch failed|network|rede/.test(m)) return true;
 
   // Autenticação, permissão e "não existe" não melhoram tentando de novo.

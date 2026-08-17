@@ -146,6 +146,7 @@ de novo sem quebrar nada. Separados, nesta ordem:
 | `17_ferramentas.sql` | Registro das ferramentas executadas |
 | `18_observabilidade.sql` | Diário do agente, batimento do motor, métricas |
 | `19_listas.sql` | Listas de clientes, campos liberados, porcentagem |
+| `20_estado_comercial.sql` | Etapa da negociação, origem, simulação já passada |
 
 O `02` é o que isola os dados de cada consultor: a consulta no fim dele tem que mostrar
 `rls_ligado = true` e 4 políticas por tabela.
@@ -187,6 +188,63 @@ testada. O brief original pedia um agente devolvendo `{action, confidence}` em J
 mas medindo o `llama3.2:3b` nessa tarefa, ele mistura `R$` com `%`, copia número de
 exemplo e responde "Não sei" pro cliente. Construir a parte mais crítica do produto
 sobre a parte menos confiável dele seria um erro caro.
+
+## Uma conversa, não mensagens soltas
+
+O agente carrega o **estado comercial** da conversa, não só fatos avulsos do
+cliente. Isso nasceu de uma conversa real que deu errado:
+
+```
+BOT:     Oi Ademar, aqui é o Ryan. Vi que seu contrato Santander tem margem
+         pra reduzir a taxa e liberar um valor pra você…
+CLIENTE: Preciso saber se ainda libera pra mim
+BOT:     Você é aposentado do INSS ou servidor? Em qual banco está seu empréstimo?
+```
+
+O bot perguntou o banco que **ele mesmo** tinha citado, duas mensagens antes.
+Do lado do cliente isso não é "faltou um dado" — é não ter ninguém prestando
+atenção. Três causas, e as três estão corrigidas:
+
+**1. Ele não aprendia com as próprias mensagens.** A abordagem carrega nome e
+banco, e isso se perdia. Agora `abordagem.js` lê a mensagem de saída e grava o
+que ela já dizia. (Cuidado que custou um teste: em "aqui é o Ryan", o nome é do
+**consultor** — a mesma frase vinda do cliente significa o contrário.)
+
+**2. Ele não entendia ponteiro pra trás.** "Aquele valor", "você já me disse",
+"já mandei" viravam perguntas novas. `referencias.js` resolve isso — e quem
+responde "eu já sei isso?" é o **estado**, nunca o modelo. Modelo perguntado se
+já sabe algo responde o que soar plausível.
+
+**3. Ele não sabia em que etapa estava.** Pedir contracheque logo depois de
+dizer "já analisei seu caso" faz o cliente concluir, com razão, que ninguém
+olhou nada. Em prospecção o próximo passo é a **simulação**, que é sua; papel
+vem depois.
+
+### O estado
+
+| Campo | O que guarda |
+| --- | --- |
+| `origem` | `prospeccao` (você abordou) ou `entrada` (ele chegou) |
+| `etapa_comercial` | prospecção → interesse → simulação → documentos → fechamento |
+| `simulacao` | `{valor, parcela, taxa, de, em}` — **só de consultor ou lista** |
+| `aguardando` | o que o bot espera dele agora |
+| `nome`, `convenio`, `banco`, `objetivo`, `coletado` | o que já se sabe |
+
+**`simulacao` é a única exceção a "memória não guarda valor"**, e ela tem regra
+dura: `de` só aceita `consultor` ou `lista`. O modelo não escreve ali, em
+caminho nenhum. Guardar o que **você** disse não é deixar a IA inventar — é o
+contrário: é o que permite recusar tudo que não seja isso.
+
+### A abordagem
+
+```
+Oi {NOME}, aqui é o Ryan. Vi que seu contrato {BANCO} tem margem pra reduzir
+a taxa de juros e liberar um valor pra você, sem aumentar nada na folha.
+Posso te mandar a simulação?
+```
+
+Não é sugestão de tom: é a abordagem comercial. Mudar o sentido dela muda o que
+o cliente está respondendo quando diz "sim".
 
 ## Quando a IA falha
 
@@ -452,7 +510,7 @@ nunca em conversa silenciada, e **nunca em quem está esperando você**.
 npm test --prefix motor
 ```
 
-256 testes, sem rede e sem IA — rodam em segundos.
+291 testes, sem rede e sem IA — rodam em segundos.
 
 Além deles há verificação de ponta a ponta contra o Supabase e o Ollama reais:
 
@@ -460,7 +518,8 @@ Além deles há verificação de ponta a ponta contra o Supabase e o Ollama reai
 npm run e2e --prefix motor
 ```
 
-`e2e:banco` confere as migrations, `e2e:queda` derruba a IA de verdade e `e2e:lista`
+`e2e:ademar` roda a conversa comercial inteira, `e2e:banco` confere as migrations,
+`e2e:queda` derruba a IA de verdade e `e2e:lista`
 importa uma planilha e confere a conta da porcentagem. Todos limpam o que criam.
 
 | Arquivo | Cobre |
@@ -479,6 +538,7 @@ importa uma planilha e confere a conta da porcentagem. Todos limpam o que criam.
 | `agente.test.js` | Os três caminhos do fluxo, ponta a ponta |
 | `extrair.test.js` | As nove frases que o modelo errava, e o óbvio decidido por código |
 | `fallback.test.js` | IA caída nos seis estados, resposta sem IA, e o cliente nunca no silêncio |
+| `conversa-comercial.test.js` | Estado, referências, não repetir pergunta — e a conversa do Ademar inteira |
 | `lista.test.js` | Porcentagem, campos liberados, telefone, e o valor cheio sendo recusado |
 | `redator.test.js` | O atalho que evita gerar texto que seria descartado |
 
@@ -517,6 +577,8 @@ motor/
     lista.js        a planilha do consultor: campos liberados e porcentagem
     extrair.js      convênio, banco, nome e objetivo por regra — sem modelo
     respostas.js    o que dá pra responder sem IA nenhuma
+    referencias.js  "aquele valor", "você já me disse" — o estado responde
+    abordagem.js    a abordagem do Ryan, e o que ela já ensina
     requisitos.js   o que falta pra simular ou fechar — código puro
     redator.js      escreve no seu tom (few-shot)
     fluxo.js        o orquestrador: retrato → decisão → execução
@@ -535,7 +597,7 @@ motor/
       ferramentas.js  o registro: 11 ações com contrato
       executor.js     limite, dedup, timeout, erro, registro
       planejar.js     o modelo escolhe o que consultar (só leitura)
-  test/             256 testes
+  test/             291 testes
   src/e2e/          verificação contra o sistema real
   sessao/           credenciais do pareamento — gitignorado
 ```

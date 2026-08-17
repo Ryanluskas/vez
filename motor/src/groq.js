@@ -21,7 +21,15 @@ import { log } from "./log.js";
 */
 
 const ENDERECO = "https://api.groq.com/openai/v1/chat/completions";
-const MODELO = process.env.GROQ_MODELO || "llama-3.3-70b-versatile";
+/*
+  O padrao mudou de llama-3.3-70b-versatile porque o Groq tirou aquele
+  modelo do ar no meio de uma sessao — funcionava as 05:15 e devolvia 404
+  as 06:07. Catalogo de terceiro muda sem avisar, e por isso o modelo e
+  variavel de ambiente desde o comeco.
+
+  Medido nesta conta: 772ms pra escrever uma resposta de WhatsApp.
+*/
+const MODELO = process.env.GROQ_MODELO || "openai/gpt-oss-120b";
 const CHAVE = process.env.GROQ_API_KEY;
 /*
   Medido nesta conta: 528ms pra escrever uma saudação com o

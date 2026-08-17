@@ -13,7 +13,9 @@
     "e2e:banco": "node src/e2e/estado-do-banco.js",
     "e2e:queda": "node src/e2e/queda.js",
     "e2e:extracao": "node src/e2e/extracao.js",
-    "e2e:lista": "node src/e2e/lista.js"
+    "e2e:lista": "node src/e2e/lista.js",
+    "e2e:ademar": "node src/e2e/ademar.js",
+    "e2e:cenario7": "node src/e2e/cenario7.js"
   },
   "engines": {
     "node": ">=20.9"

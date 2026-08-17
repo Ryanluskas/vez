@@ -82,6 +82,23 @@ const GATILHOS = [
     padrao: new RegExp(`\\b${VERBO_DE_DINHEIRO}\\b[^?.!]{0,40}\\b${QUANTO}\\b`),
   },
   {
+    /*
+      "Liberar" sozinho, sem "quanto" por perto.
+
+      Achado na conversa do Ademar: ele escreveu "Preciso saber se ainda
+      libera pra mim" e o gatilho nao pegou — o padrao exigia "quanto"
+      colado no verbo. Mas "ainda libera?", "da pra liberar?", "foi
+      liberado?" sao todas a MESMA pergunta, e nenhuma tem "quanto".
+
+      Neste ramo "liberar" so tem um significado: dinheiro saindo pro
+      cliente. Nao existe uso inocente dentro de uma conversa de
+      consignado — e um verbo que so quer dizer dinheiro merece gatilho
+      proprio.
+    */
+    motivo: "perguntou se libera",
+    padrao: /\b(libera|liberam|liberar|liberou|liberado|liberada|liberacao)\b/,
+  },
+  {
     motivo: "falou em valor",
     padrao: /\b(valor|valores|quantia|montante)\b/,
   },

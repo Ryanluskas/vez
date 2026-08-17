@@ -256,3 +256,37 @@ test("observador mudo tem a mesma interface", async () => {
   await mudo.terminar();
   assert.ok(true);
 });
+
+test("429 não é retentado: o limite não passa em um segundo", () => {
+  /*
+    Medido no E2E: o Groq devolve 429 quando o teto de tokens por minuto
+    estoura, e a retentativa imediata levava outro 429. Duas chamadas
+    queimadas pra chegar no mesmo lugar, com o cliente esperando as duas.
+
+    O caminho certo já existe — cai pro modelo local. Insistir no serviço
+    que acabou de dizer "você passou do limite" só atrasa isso.
+  */
+  assert.equal(ehPassageiro(new Error("Groq recusou por limite de uso")), false);
+  assert.equal(ehPassageiro(new Error("Request failed with 429")), false);
+  assert.equal(ehPassageiro(new Error("rate limit exceeded")), false);
+  assert.equal(ehPassageiro(new Error("Too Many Requests")), false);
+
+  // E o que continua sendo retentado.
+  assert.equal(ehPassageiro(new Error("503 Service Unavailable")), true);
+  assert.equal(ehPassageiro(new Error("ETIMEDOUT")), true);
+});
+
+test("com o Groq no limite, o local assume sem esperar", async () => {
+  let chamadasNoGroq = 0;
+
+  const r = await tentar(
+    async () => {
+      chamadasNoGroq++;
+      throw new Error("Groq recusou por limite de uso");
+    },
+    { nome: "Groq", tentativas: 2, silencioso: true }
+  );
+
+  assert.equal(r.ok, false);
+  assert.equal(chamadasNoGroq, 1, "insistiu num limite que não ia passar");
+});

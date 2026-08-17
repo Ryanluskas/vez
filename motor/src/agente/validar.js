@@ -153,6 +153,12 @@ const MALFORMADO = [
   [/(.)\1{6,}/, "caractere repetido em looping"],
   [/\b(?:como (?:uma? )?(?:IA|inteligência artificial)|modelo de linguagem)\b/i, "a IA falou que é IA"],
   [/REGRAS QUE NÃO SE QUEBRAM|NAO_SEI/, "vazou pedaço do prompt"],
+  /*
+    Modelo de raciocínio vazando o rascunho dele. O catálogo do Groq mudou
+    no meio da sessão e um dos substitutos disponíveis (qwen3.6) devolve o
+    pensamento inteiro dentro de <think>. O cliente receberia isso.
+  */
+  [/<\/?think>|<\/?reasoning>|<\|channel\|>/i, "vazou o raciocínio do modelo"],
 ];
 
 const LIMITE_DE_TAMANHO = 900;

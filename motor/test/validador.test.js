@@ -305,3 +305,16 @@ test("entradas vazias não quebram", () => {
   assert.equal(validarAntesDeEnviar(null, caso()).ok, false);
   assert.equal(validarAntesDeEnviar("Oi Antonio, tudo bem?", {}).ok, true);
 });
+
+test("raciocínio de modelo vazado não chega ao cliente", () => {
+  /*
+    O catálogo do Groq mudou no meio de uma sessão: o modelo configurado
+    passou a devolver 404, e um dos substitutos disponíveis devolve o
+    pensamento inteiro dentro de <think>.
+
+    Trocar de modelo não pode virar trocar o que o cliente recebe.
+  */
+  assert.ok(textoMalformado("<think>Here's a thinking process: 1. Analyze...</think> Oi Antonio!"));
+  assert.ok(textoMalformado("<reasoning>o cliente quer saber o prazo</reasoning> São 2 dias."));
+  assert.equal(textoMalformado("Oi Antonio! São 2 dias úteis, pode ser?"), null);
+});

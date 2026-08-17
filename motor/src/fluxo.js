@@ -1,7 +1,7 @@
 import { classificar } from "./classificar.js";
 import { escreverResposta, escreverComResposta, escreverPedido } from "./redator.js";
 import { criarMemoria } from "./memoria.js";
-import { REQUISITOS } from "./requisitos.js";
+import { REQUISITOS, queFalta } from "./requisitos.js";
 import { decidir, podeAgirSozinho, ACOES } from "./agente/decidir.js";
 import { validarDecisao, validarAntesDeEnviar } from "./agente/validar.js";
 import { criarExecutor } from "./agente/executor.js";
@@ -9,7 +9,10 @@ import { planejarConsultas, consultasEmTexto } from "./agente/planejar.js";
 import { EVENTOS, observadorMudo } from "./observar.js";
 import { criarTravas } from "./travas.js";
 import { criarLista } from "./lista.js";
+import { numerosDeRisco } from "./numeros.js";
 import * as respostas from "./respostas.js";
+import { resolver, perguntaQueAmarra, tirarOQueJaSei, oQueJaSei } from "./referencias.js";
+import { ehAbordagem, aceitouAAbordagem } from "./abordagem.js";
 import { exemplosComBase } from "./estilo.js";
 import { log } from "./log.js";
 
@@ -546,6 +549,194 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
     return chamada;
   }
 
+  /*
+    ==================================================================
+    RESPONDER O QUE ELE ESTÁ REFERENCIANDO
+
+    Devolve true quando resolveu — e aí o fluxo normal nem roda.
+
+    Três caminhos, e nenhum deles é "recomeçar a investigação":
+
+    1. Ele aponta pra simulação e eu TENHO o número → responde com ele.
+       O número vem do estado, gravado com procedência, e o validador
+       confere contra essa mesma fonte. Não é o modelo lembrando: é o
+       banco de dados devolvendo o que VOCÊ disse.
+
+    2. Ele aponta pra algo que eu NÃO tenho → pergunta só o que amarra a
+       referência. Uma pergunta, sem número.
+
+    3. Ele diz que já informou, e eu tenho o que ele diz → confirma em
+       voz alta e segue. É o oposto de perguntar de novo.
+    ==================================================================
+  */
+  async function responderReferencia({
+    conversa,
+    nomeCliente,
+    lembrado,
+    referencia,
+    pergunta,
+    contexto,
+    ciclo,
+  }) {
+    const nome = lembrado?.nome ?? nomeCliente;
+
+    /* ---- Aponta pra simulação ---- */
+    if (referencia.alvo === "simulacao") {
+      if (!referencia.tenho) {
+        /*
+          Não tenho o número. NÃO invento, e também não recomeço: pergunto
+          só o que amarra, e mando pra Fila porque quem tem o valor é você.
+        */
+        const amarra = respostas.conferido(perguntaQueAmarra(referencia));
+
+        if (amarra) {
+          await abrirRascunho({
+            idConversa: conversa.id,
+            texto: comNomeNaFrente(nome, amarra),
+            categoria: "valor",
+          });
+        }
+
+        await mandarProConsultor({
+          ciclo,
+          conversa,
+          nomeCliente,
+          lembrado,
+          pergunta,
+          motivo: "ele cobrou o valor da simulação e eu não tenho o número",
+          categoria: "valor",
+          // Já mandei a pergunta que amarra; dois avisos seguidos é ruído.
+          avisar: !amarra,
+        });
+
+        log.destaque(`→ FILA  ${nomeCliente ?? ""} · cobrou a simulação, e o número é seu`);
+        return true;
+      }
+
+      /*
+        Tenho. O número sai do ESTADO, não do modelo — e a fonte que o
+        validador vai conferir é exatamente ele.
+      */
+      const s = referencia.simulacao;
+      const comoTexto = [
+        s.valor ? `valor ${s.valor}` : null,
+        s.parcela ? `parcela ${s.parcela}` : null,
+        s.taxa ? `taxa ${s.taxa}` : null,
+      ]
+        .filter(Boolean)
+        .join(", ");
+
+      const respondeu = await responderComALista({
+        conversa,
+        nomeCliente,
+        pergunta,
+        contexto,
+        lembrado,
+        dados: { texto: comoTexto, de: s.de === "lista" ? "sua lista" : "você" },
+        categoria: "valor",
+      });
+
+      if (respondeu) {
+        log.destaque(`→ RASCUNHO  ${nomeCliente ?? ""} · retomei a simulação que ${s.de} passou`);
+        return true;
+      }
+
+      // Não deu pra escrever com segurança: segue o caminho normal.
+      return false;
+    }
+
+    /* ---- Ele diz que já informou, ou contesta o pedido ---- */
+    if (referencia.alvo === "ja_informado" || referencia.alvo === "contesta_pedido") {
+      if (!referencia.tenho) return false;
+
+      /*
+        Ele tem razão: eu tenho o que ele diz ter dado. Confirmar em voz
+        alta é o que faz a memória valer pra ele — e é o oposto exato de
+        perguntar de novo.
+      */
+      const sabidos = referencia.jaSei
+        .filter((s) => s.campo !== "simulacao")
+        .map((s) => rotuloDoQueSei(s))
+        .filter(Boolean);
+
+      if (sabidos.length === 0) return false;
+
+      const texto = respostas.conferido(
+        comNomeNaFrente(
+          nome,
+          `isso mesmo, já tenho aqui: ${juntar(sabidos)}. Deixa eu seguir daqui.`
+        )
+      );
+
+      if (!texto) return false;
+
+      const sozinho = await abrirRascunho({
+        idConversa: conversa.id,
+        texto,
+        categoria: "saudacao",
+      });
+
+      log.info(
+        `→ ${sozinho ? "RESPONDENDO" : "rascunho"}  ${nomeCliente ?? ""} · confirmei o que já sei`
+      );
+      return true;
+    }
+
+    /* ---- Aponta pro contrato ---- */
+    if (referencia.alvo === "contrato" && referencia.tenho) {
+      // Sei o banco. Não é motivo pra responder sozinho, mas é motivo
+      // pra NÃO perguntar qual é — e disso o `tirarOQueJaSei` cuida.
+      return false;
+    }
+
+    /* ---- Ele diz que já mandou documento ---- */
+    if (referencia.alvo === "documento_enviado") {
+      if (!referencia.tenho) {
+        const amarra = respostas.conferido(perguntaQueAmarra(referencia));
+        if (!amarra) return false;
+
+        await abrirRascunho({
+          idConversa: conversa.id,
+          texto: comNomeNaFrente(nome, amarra),
+          categoria: "documentos",
+        });
+        return true;
+      }
+
+      const texto = respostas.conferido(
+        respostas.documentoRecebido(nome, queFalta(lembrado, { para: "fechar" }))
+      );
+      if (!texto) return false;
+
+      await abrirRascunho({ idConversa: conversa.id, texto, categoria: "documentos" });
+      return true;
+    }
+
+    return false;
+  }
+
+  function comNomeNaFrente(nome, frase) {
+    if (!nome) return frase.charAt(0).toUpperCase() + frase.slice(1);
+    return `${nome}, ${frase.charAt(0).toLowerCase()}${frase.slice(1)}`;
+  }
+
+  function juntar(lista) {
+    if (lista.length === 1) return lista[0];
+    return `${lista.slice(0, -1).join(", ")} e ${lista.at(-1)}`;
+  }
+
+  const COMO_DIZER = {
+    convenio: { inss: "que você é do INSS", servidor: "que você é servidor", militar: "que você é militar" },
+  };
+
+  function rotuloDoQueSei({ campo, valor }) {
+    if (campo === "convenio") return COMO_DIZER.convenio[valor] ?? null;
+    if (campo === "banco") return `seu contrato no ${valor}`;
+    if (campo === "nome") return null;
+    if (campo === "objetivo") return null;
+    return REQUISITOS[campo] ? `seu ${REQUISITOS[campo].rotulo}` : null;
+  }
+
   async function abrirRascunho({
     idConversa,
     texto,
@@ -663,6 +854,22 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
 
         await supabase.from("conversas").update(mudanca).eq("id", conversa.id);
         Object.assign(conversa, mudanca);
+      }
+
+      /*
+        ================================================================
+        O BOT APRENDE COM AS PRÓPRIAS MENSAGENS
+
+        A abordagem diz "Oi Ademar, seu contrato Santander…". Isso é nome
+        e banco, ditos na conversa, e se perdiam inteiros — duas mensagens
+        depois o bot perguntava o banco que ele mesmo tinha citado.
+
+        A informação não passa a existir porque o cliente a repetiu.
+        ================================================================
+      */
+      if (direcao === "enviada" && ehAbordagem(texto)) {
+        await memoria.garantir(conversa.id);
+        await memoria.aprenderDaAbordagem(conversa.id, texto);
       }
 
       return conversa;
@@ -815,6 +1022,33 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
         }
       }
 
+      /*
+        ================================================================
+        "EU JÁ SEI ISSO?" — ANTES DE PERGUNTAR QUALQUER COISA
+
+        O cliente escreve "aquele valor", "você já me disse", "já mandei".
+        Isso não é uma pergunta nova: é um ponteiro pra trás.
+
+        Antes, cada mensagem chegava como se fosse a primeira. O cliente
+        dizia "preciso saber se ainda libera pra mim" e recebia "você é
+        aposentado do INSS ou servidor? em qual banco…" — a investigação
+        recomeçando do zero, sobre um contrato que o próprio bot tinha
+        citado na mensagem de abertura.
+
+        Quem responde "eu já sei isso?" é o ESTADO, nunca o modelo. Modelo
+        perguntado se já sabe algo responde o que soar plausível. Aqui é
+        leitura de banco: ou o campo tem valor, ou não tem.
+        ================================================================
+      */
+      const referencia = resolver(texto, lembrado);
+
+      if (referencia) {
+        observador.registrar(EVENTOS.CLASSIFICOU, {
+          idConversa: conversa.id,
+          detalhe: `referência a "${referencia.alvo}" · ${referencia.tenho ? "eu tenho" : "não tenho"}`,
+        });
+      }
+
       const classificacao = travada
         ? null
         : await classificar({ texto, contexto });
@@ -877,11 +1111,67 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
         return;
       }
 
+      /*
+        ================================================================
+        A REFERÊNCIA GANHA DA INVESTIGAÇÃO
+
+        Antes de qualquer pergunta, o ponteiro pra trás. Duas saídas, e
+        nenhuma delas é "começar tudo de novo":
+
+        TENHO o que ele referenciou (a simulação que você passou, o banco
+        do contrato, o documento que ele mandou) → continua dali. Se for
+        número, ele vem do estado, com procedência gravada — nunca do
+        modelo.
+
+        NÃO TENHO → pergunto SÓ o que amarra a referência. Uma pergunta,
+        sem número, e o assunto continua sendo o dele.
+        ================================================================
+      */
+      if (referencia && !travada) {
+        const seguiu = await responderReferencia({
+          conversa,
+          nomeCliente,
+          lembrado,
+          referencia,
+          pergunta: texto,
+          contexto,
+          ciclo,
+        });
+
+        if (seguiu) return;
+      }
+
       if (decisao.acao === ACOES.PERGUNTAR_CLIENTE) {
+        /*
+          Última rede antes de abrir a boca: tira do pedido tudo que o
+          estado já tem. `montarPedido` já filtra, mas repetir pergunta é
+          o erro mais caro do produto — mais caro que não responder,
+          porque destrói a confiança em vez de só adiar.
+        */
+        const pedido = tirarOQueJaSei(decisao.pedido, lembrado);
+
+        if (!pedido) {
+          log.alerta("Ia pedir só o que eu já sabia. Mandando pra você em vez disso.");
+          await mandarProConsultor({
+            ciclo,
+            conversa,
+            nomeCliente,
+            lembrado,
+            pergunta: texto,
+            motivo: "já tenho tudo que ia perguntar; falta um dado seu",
+            categoria: decisao.categoria ?? "outro",
+          });
+          return;
+        }
+
+        if (pedido.filtrado) {
+          log.info(`   tirei do pedido o que já sabia: sobrou ${pedido.chaves.join(", ")}`);
+        }
+
         await pedirAoCliente({
           conversa,
           nomeCliente,
-          pedido: decisao.pedido,
+          pedido,
           contexto,
           porque: texto,
           confianca: decisao.confianca,
@@ -1249,6 +1539,26 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
         idPendencia: pendencia.id,
         origem: "consultor",
       });
+
+      /*
+        ================================================================
+        GRAVA O QUE VOCÊ ACABOU DE DIZER AO CLIENTE
+
+        Sem isto, dez minutos depois o cliente escreve "aquele valor" e o
+        bot não tem ideia de qual. Ele já respondeu essa pergunta — e não
+        lembra que respondeu.
+
+        Procedência 'consultor', gravada junto. É o que permite ao
+        validador aceitar esse número depois: ele confere contra esta
+        fonte, e recusa qualquer outro.
+      */
+      const numeros = numerosDeRisco(pendencia.resposta ?? "");
+      if (numeros.length) {
+        await memoria.guardarSimulacao(pendencia.id_conversa, {
+          valor: pendencia.resposta,
+          de: "consultor",
+        });
+      }
 
       observador.registrar(EVENTOS.CONSULTOR, {
         idConversa: pendencia.id_conversa,

@@ -1,6 +1,7 @@
 import { pensar } from "./ia.js";
 import { REQUISITOS } from "./requisitos.js";
 import { extrairPorRegra, aindaFalta, pareceTerFato } from "./extrair.js";
+import { oQueAAbordagemEnsina } from "./abordagem.js";
 import { log } from "./log.js";
 
 /*
@@ -154,6 +155,99 @@ export function criarMemoria(supabase, userId) {
     });
   }
 
+  /* ------------------------------------------------------------------
+     Estado comercial
+  ------------------------------------------------------------------ */
+
+  /*
+    O que a própria abordagem do consultor ensina.
+
+    "Oi Ademar, seu contrato Santander…" carrega nome e banco. Isso se
+    perdia inteiro, e duas mensagens depois o bot perguntava o banco que ele
+    mesmo tinha citado.
+
+    A informação não passa a existir porque o cliente a repetiu — ela já
+    estava na conversa.
+  */
+  async function aprenderDaAbordagem(idConversa, texto) {
+    const fatos = oQueAAbordagemEnsina(texto);
+    const temAlgo = fatos.nome || fatos.banco || fatos.objetivo;
+
+    await supabase
+      .from("memoria")
+      .update({
+        origem: "prospeccao",
+        etapa_comercial: "prospeccao",
+        aguardando: "resposta_da_abordagem",
+        atualizado_em: new Date().toISOString(),
+      })
+      .eq("id_conversa", idConversa);
+
+    if (!temAlgo) return await ler(idConversa);
+
+    const depois = await aprender(idConversa, fatos);
+    log.info(`   a abordagem já dizia: ${[fatos.nome, fatos.banco].filter(Boolean).join(", ")}`);
+    return depois;
+  }
+
+  /*
+    Guarda o que JÁ FOI DITO ao cliente.
+
+    Esta é a única coisa nesta tabela que é número de dinheiro, e ela tem
+    uma regra dura: `de` só aceita 'consultor' ou 'lista'. Modelo não
+    escreve aqui, em caminho nenhum.
+
+    Guardar o que VOCÊ disse não é deixar a IA inventar — é o contrário. É o
+    que permite, depois, recusar tudo que não seja isto.
+  */
+  async function guardarSimulacao(idConversa, { valor, parcela, taxa, de }) {
+    if (de !== "consultor" && de !== "lista") {
+      log.erro(`Recusei gravar simulação de origem "${de}". Só consultor ou lista.`);
+      return await ler(idConversa);
+    }
+
+    const atual = await garantir(idConversa);
+    const simulacao = {
+      ...(atual?.simulacao ?? {}),
+      ...(valor ? { valor } : {}),
+      ...(parcela ? { parcela } : {}),
+      ...(taxa ? { taxa } : {}),
+      de,
+      em: new Date().toISOString(),
+    };
+
+    const { data } = await supabase
+      .from("memoria")
+      .update({
+        simulacao,
+        etapa_comercial: "documentos",
+        aguardando: null,
+        atualizado_em: new Date().toISOString(),
+      })
+      .eq("id_conversa", idConversa)
+      .select("*")
+      .single();
+
+    log.info(`   guardei a simulação que ${de === "lista" ? "veio da lista" : "você passou"}.`);
+    return data ?? atual;
+  }
+
+  /* Move a negociação. Quem move é o agente, olhando o que aconteceu. */
+  async function mudarEtapaComercial(idConversa, etapa, aguardando = undefined) {
+    const { data } = await supabase
+      .from("memoria")
+      .update({
+        etapa_comercial: etapa,
+        ...(aguardando === undefined ? {} : { aguardando }),
+        atualizado_em: new Date().toISOString(),
+      })
+      .eq("id_conversa", idConversa)
+      .select("*")
+      .maybeSingle();
+
+    return data;
+  }
+
   async function registrarAcao(idConversa, acao, motivo) {
     await supabase
       .from("memoria")
@@ -245,6 +339,9 @@ export function criarMemoria(supabase, userId) {
     ler,
     garantir,
     aprender,
+    aprenderDaAbordagem,
+    guardarSimulacao,
+    mudarEtapaComercial,
     registrarPergunta,
     confirmarPeloUltimoPedido,
     registrarAcao,
