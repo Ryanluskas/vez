@@ -80,3 +80,39 @@ test("aguenta entrada vazia ou nula sem quebrar", () => {
   assert.equal(checarGatilhos(null).travou, false);
   assert.equal(checarGatilhos(undefined).travou, false);
 });
+
+/*
+  Achado depois, escrevendo o extrator determinístico: a lista de verbos
+  tinha "pega" e "pegar" mas não "pego" — e "quanto eu pego?" é a forma mais
+  comum de todas, porque o cliente fala de si.
+
+  Primeira pessoa é a que mais aparece. Cada verbo novo entra com o "eu" dele.
+*/
+test("primeira pessoa: o jeito que o cliente fala de si", () => {
+  const perguntas = [
+    "quanto eu pego?",
+    "quanto eu tiro?",
+    "quanto eu saco?",
+    "quanto eu levo?",
+    "quanto eu ganho com isso?",
+    "quanto entra na minha conta?",
+    "eu pego quanto?",
+    "dá pra saber quanto eu pego",
+  ];
+
+  for (const p of perguntas) {
+    assert.equal(checarGatilhos(p).travou, true, `"${p}" passou batido pela regra de ouro`);
+  }
+});
+
+test("mensagem com dois assuntos trava pelo que vale dinheiro", () => {
+  // O documento é inofensivo; o "quanto eu pego" no fim não é.
+  assert.equal(checarGatilhos("quais documentos e quanto eu pego?").travou, true);
+  assert.equal(checarGatilhos("bom dia, quais papéis preciso e quanto libera?").travou, true);
+});
+
+test("prazo continua passando: 'quanto tempo' não é dinheiro", () => {
+  for (const p of ["quanto tempo demora?", "quanto tempo leva pra cair?", "leva quanto tempo?"]) {
+    assert.equal(checarGatilhos(p).travou, false, `"${p}" travou à toa`);
+  }
+});

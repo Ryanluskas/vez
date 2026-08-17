@@ -4,9 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "node scripts/conferir-server-actions.mjs && next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "conferir": "node scripts/conferir-server-actions.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.4",

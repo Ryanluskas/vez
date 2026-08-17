@@ -19,6 +19,7 @@ const roteiro = path.join(AQUI, "_queda_temp.mjs");
 
 const iaJs = pathParaUrl(path.join(AQUI, "..", "ia.js"));
 const resilienciaJs = pathParaUrl(path.join(AQUI, "..", "resiliencia.js"));
+const ollamaJs = pathParaUrl(path.join(AQUI, "..", "ollama.js"));
 
 /* O caminho vira URL de arquivo: sem isso, espaço em "Nova pasta" quebra o
    import e o erro sai como se o módulo não existisse. */
@@ -31,6 +32,15 @@ fs.writeFileSync(
   `
 import { pensar, escrever } from ${JSON.stringify(iaJs)};
 import { disjuntores } from ${JSON.stringify(resilienciaJs)};
+import { aquecer } from ${JSON.stringify(ollamaJs)};
+
+/*
+  Aquece antes, como o motor faz no boot. Sem isto o teste mede o tempo de
+  carregar 2GB do disco, não o tempo de responder — e com o corte curto de
+  classificação, mediria uma falha que em produção não acontece, porque o
+  motor mantém o modelo quente.
+*/
+await aquecer();
 
 const pensou = await pensar({ sistema: "responda json", prompt: "oi" });
 const escreveu = await escrever({ sistema: "escreva uma saudacao", prompt: "oi" });

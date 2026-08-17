@@ -1,12 +1,13 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import {
-  salvarModoAutonomo,
-  CATEGORIAS_LIBERAVEIS,
-  MODOS,
-  type Resultado,
-} from "@/lib/acoes-painel";
+import { salvarModoAutonomo, type Resultado } from "@/lib/acoes-painel";
+/*
+  Os dados vêm de um módulo próprio, não do arquivo de ações: um arquivo
+  "use server" só pode exportar funções async, e um array ali derruba a
+  página em runtime mesmo com o build passando.
+*/
+import { CATEGORIAS_LIBERAVEIS, MODOS } from "@/lib/modos";
 import { cn } from "@/lib/cn";
 
 /*

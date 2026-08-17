@@ -59,18 +59,49 @@ function exigir(valor, oQue) {
   return valor;
 }
 
-/* Decisão e extração: sempre local. */
+/*
+  Pensar roda LOCAL por padrão, e isso é decisão de produto, não de
+  arquitetura: essas chamadas veem a mensagem crua do cliente, inclusive
+  quando ela fala de dinheiro, e "as mensagens não saem do seu computador" é
+  o que o consultor vende pro cliente dele.
+
+  VEZ_PENSAR_NA_NUVEM=1 abre uma exceção: se o local falhar, o Groq tenta.
+  Fica desligado por padrão porque ligar isso é escolher velocidade sobre a
+  promessa — e essa escolha é do consultor, não minha.
+*/
+const pensarNaNuvem = process.env.VEZ_PENSAR_NA_NUVEM === "1";
+
 export async function pensar({ prompt, sistema }) {
+  /*
+    UMA tentativa, não duas. Com o corte de 12s, duas tentativas são 24
+    segundos de cliente esperando por uma classificação que o código já
+    resolveu na maioria dos casos antes de chegar aqui.
+  */
   const r = await disjuntores.ollama.rodar(
     async () => exigir(await gerarJsonNoOllama({ prompt, sistema }), "Ollama"),
-    { tentativas: 2 }
+    { tentativas: 1 }
   );
 
-  /*
-    Duas tentativas, não três: classificar é o caminho quente. Cada
-    tentativa a mais é o cliente olhando pro "digitando…" que não vem.
-  */
-  return r.ok ? r.valor : null;
+  if (r.ok) return r.valor;
+
+  if (pensarNaNuvem && groqConfigurado) {
+    log.alerta("Modelo local falhou; classificando no Groq (VEZ_PENSAR_NA_NUVEM=1).");
+    const naNuvem = await disjuntores.groq.rodar(
+      async () => exigir(await gerarNoGroq({ prompt, sistema, json: true, temperatura: 0 }), "Groq"),
+      { tentativas: 1 }
+    );
+
+    if (naNuvem.ok) {
+      try {
+        return JSON.parse(naNuvem.valor);
+      } catch {
+        return null;
+      }
+    }
+  }
+
+  // Null vira pendência lá em cima. Nunca vira palpite.
+  return null;
 }
 
 /*
@@ -95,7 +126,7 @@ export async function escrever({ prompt, sistema, temperatura = 0.4 }) {
 
   const local = await disjuntores.ollama.rodar(
     async () => exigir(await gerarNoOllama({ prompt, sistema, temperatura }), "Ollama"),
-    { tentativas: 2 }
+    { tentativas: 1 }
   );
 
   // Os dois fora: quem chamou manda pra fila. Nunca inventa.

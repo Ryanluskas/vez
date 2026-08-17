@@ -1,3 +1,4 @@
+import fsSync from "node:fs";
 import { lerAmbiente } from "../ambiente.js";
 import { criarClienteDoMotor, entrarNaConta } from "../supabase.js";
 import { criarFluxo } from "../fluxo.js";
@@ -32,8 +33,8 @@ import { numerosDeRisco } from "../numeros.js";
   5599 pra nunca colidir com cliente de verdade.
 
   Ele também MEXE no modo do agente pra poder testar envio automático, e
-  devolve o modo original no fim. Se o processo morrer no meio, o modo
-  original fica escrito no log acima — dá pra restaurar na mão.
+  devolve o modo original no fim — inclusive se for morto no meio, porque
+  o valor original fica anotado em disco antes de qualquer mudança.
   ============================================================================
 */
 
@@ -106,6 +107,44 @@ const escuta = criarEscuta({ supabase, fluxo, maestro, userId, observador });
 const paraLimpar = { conversas: [], conhecimento: [], conexao: null };
 let modoOriginal = null;
 let desligarEscuta = null;
+
+/*
+  ============================================================================
+  O MODO ORIGINAL SOBREVIVE A UM KILL
+
+  Este teste troca o modo do agente para 'autonomo' e devolve no fim. O
+  `finally` cobre erro e saída normal — não cobre o processo sendo morto.
+
+  E foi morto: interrompi uma rodada no meio, o modo ficou 'autonomo', e a
+  rodada seguinte leu esse valor como se fosse o original. Duas execuções e
+  a conta do consultor ficaria em modo autônomo permanentemente, por causa
+  de um teste.
+
+  A anotação em arquivo resolve: se ela existe quando o teste começa, é
+  porque a rodada anterior não terminou, e o valor certo está nela.
+  ============================================================================
+*/
+const ANOTACAO = new URL("./_modo-original.json", import.meta.url);
+
+function guardarModoOriginal(prefs) {
+  fsSync.writeFileSync(ANOTACAO, JSON.stringify(prefs));
+}
+
+function modoAnotado() {
+  try {
+    return JSON.parse(fsSync.readFileSync(ANOTACAO, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function esquecerAnotacao() {
+  try {
+    fsSync.rmSync(ANOTACAO, { force: true });
+  } catch {
+    /* sem a anotação o fallback é o que já está no banco */
+  }
+}
 
 async function limparTudo() {
   titulo("Limpeza");
@@ -292,7 +331,12 @@ try {
     .eq("user_id", userId)
     .maybeSingle();
 
-  modoOriginal = prefs ?? { modo: "manual", categorias: [] };
+  /*
+    A anotacao ganha do banco: se ela existe, a rodada anterior morreu no
+    meio e o que esta no banco agora e o valor do TESTE, nao o seu.
+  */
+  modoOriginal = modoAnotado() ?? prefs ?? { modo: "manual", categorias: [] };
+  guardarModoOriginal(modoOriginal);
   console.log(`  ! modo original: "${modoOriginal.modo}" · categorias: ${JSON.stringify(modoOriginal.categorias)}`);
   console.log("    (se este processo morrer, restaure isso na mão em Conta)");
 

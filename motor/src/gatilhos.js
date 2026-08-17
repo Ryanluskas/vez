@@ -42,8 +42,25 @@ function normalizar(texto) {
   perto de verbo de dinheiro trava.
 */
 const QUANTO = "(?:quanto|quantos|quanta|qnt|qto)(?!\\s+tempo)";
+/*
+  As conjugacoes estao escritas uma a uma, e isso tem custo: "pega" e "pegar"
+  estavam aqui, "pego" nao — e "quanto eu pego?" passava batido pela regra de
+  ouro. Achado por teste, nao em producao, mas era exatamente o buraco que
+  faria o bot responder sozinho a pergunta mais cara do produto.
+
+  A primeira pessoa e a forma que o cliente mais usa: ele fala de si. Toda
+  vez que entrar um verbo aqui, entra tambem o "eu" dele.
+*/
 const VERBO_DE_DINHEIRO =
-  "(?:libera|liberar|liberacao|consigo|conseguir|consegue|posso|da pra|pega|pegar|sai|vem|cai|cair|recebo|receber|fica|ficaria|rende|sobra|resta|empresta|emprestar)";
+  "(?:libera|liberar|liberacao|consigo|conseguir|consegue|posso|da pra|" +
+  "pega|pegar|pego|" +
+  "tira|tirar|tiro|" +
+  "saca|sacar|saco|" +
+  "leva|levar|levo|" +
+  "ganha|ganhar|ganho|" +
+  "resgata|resgatar|resgato|" +
+  "sai|vem|cai|cair|recebo|receber|fica|ficaria|rende|sobra|resta|" +
+  "empresta|emprestar|entra|entrar)";
 
 const GATILHOS = [
   {

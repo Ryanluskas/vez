@@ -3,6 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { criarClienteServidor, usuarioAtual } from "@/lib/supabase/servidor";
 import { ETAPAS, type Etapa } from "@/lib/tipos";
+/*
+  Estas listas ficam num modulo proprio porque um arquivo "use server" so
+  pode EXPORTAR funcoes async. Importar dado aqui e livre; exportar nao era,
+  e um array exportado daqui derrubava /meu-jeito em runtime com o build
+  passando limpo.
+*/
+import { CATEGORIAS_LIBERAVEIS, MODOS } from "@/lib/modos";
 
 export type Resultado = { erro?: string; ok?: boolean };
 
@@ -562,40 +569,6 @@ export async function apagarAtalho(
 /* ------------------------------------------------------------------
    Modo autônomo — o que sai sem passar por você
 ------------------------------------------------------------------ */
-
-/*
-  "valor" não está aqui e nunca vai estar. É a última barreira antes do
-  envio, depois da regra rígida, do redator e da conferência de números —
-  cada camada assume que a anterior falhou.
-*/
-export const CATEGORIAS_LIBERAVEIS = [
-  { chave: "saudacao", nome: "Saudação e agradecimento", exemplo: "“bom dia”, “obrigado”" },
-  { chave: "documentos", nome: "Documentos", exemplo: "“quais papéis preciso?”" },
-  { chave: "prazo", nome: "Prazos", exemplo: "“quanto tempo demora?”" },
-  { chave: "horario", nome: "Horário", exemplo: "“você atende sábado?”" },
-  { chave: "acompanhamento", nome: "Acompanhamento e objeção", exemplo: "“e aí, saiu?”, “vou pensar”" },
-  { chave: "elegibilidade", nome: "Se pode fazer, qual banco", exemplo: "“você trabalha com INSS?”" },
-  { chave: "outro", nome: "Não classificado", exemplo: "o que a IA não soube encaixar" },
-] as const;
-
-export const MODOS = [
-  {
-    chave: "manual",
-    nome: "Manual",
-    resumo: "Tudo espera sua aprovação em Rascunhos.",
-  },
-  {
-    chave: "assistido",
-    nome: "Assistido",
-    resumo:
-      "Sai sozinho o que foi decidido por regra; o que dependeu de palpite da IA espera você.",
-  },
-  {
-    chave: "autonomo",
-    nome: "Autônomo",
-    resumo: "Sai sozinho sempre que o assunto estiver liberado abaixo.",
-  },
-] as const;
 
 export async function salvarModoAutonomo(
   _anterior: Resultado,

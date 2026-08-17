@@ -65,10 +65,34 @@ async function conferirIa() {
   if (segundos === null) {
     log.alerta("Não consegui aquecer o modelo; a primeira resposta vai demorar.");
   } else {
-    log.info(`Modelo quente em ${segundos}s. Fica na memória por 30 minutos.`);
+    log.info(`Modelo quente em ${segundos}s. Mantido na memória enquanto o motor rodar.`);
   }
 
   return true;
+}
+
+/*
+  Reaquece o modelo antes de ele esfriar.
+
+  O Ollama descarrega o modelo depois de 30 minutos parado, e recarregar
+  2GB do disco leva ~40 segundos. Com o corte de 12s para classificar, isso
+  significa que a PRIMEIRA mensagem depois de um período parado ia direto
+  pra fila — e período parado é o normal: consultor recebe mensagem em
+  rajada e depois fica horas sem nada.
+
+  Uma chamada de um token a cada 20 minutos custa quase nada e faz o corte
+  curto ser seguro. Sem isso, encurtar o tempo limite só trocaria "cliente
+  esperando dois minutos" por "cliente indo pra fila à toa".
+*/
+const AQUECER_A_CADA_MS = 20 * 60 * 1000;
+
+function manterQuente() {
+  const relogio = setInterval(() => {
+    aquecer().catch(() => {});
+  }, AQUECER_A_CADA_MS);
+
+  relogio.unref?.();
+  return () => clearInterval(relogio);
 }
 
 async function principal() {
@@ -83,7 +107,8 @@ async function principal() {
   const usuario = await entrarNaConta(supabase, ambiente);
   log.info(`Conta: ${usuario.email}`);
 
-  await conferirIa();
+  const iaPronta = await conferirIa();
+  const pararDeAquecer = iaPronta ? manterQuente() : () => {};
 
   /*
     O diário e o batimento sobem antes de tudo que atende: se o WhatsApp
@@ -124,6 +149,7 @@ async function principal() {
     log.info(`Encerrando (${sinal})…`);
     desligarEscuta?.();
     desligarSeguimento?.();
+    pararDeAquecer();
     await maestro.desligarTudo();
     // O diário sai por último: ele tem que registrar o que aconteceu até agora.
     await observador.terminar();
