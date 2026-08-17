@@ -14,6 +14,9 @@ outros. Você responde só o número; ele escreve, valida e manda.
 simulação vêm de você ou do banco de dados — nunca do modelo. Ele decide *como*
 responder, jamais *qual* é o dado.
 
+O valor pode vir de dois lugares reais: **você respondendo na Fila**, ou **uma lista que
+você subiu**. Nunca do modelo.
+
 Isso não é uma instrução no prompt. São cinco barreiras independentes, e cada uma
 assume que a anterior falhou:
 
@@ -56,12 +59,13 @@ Concluído e funcionando:
 - [x] **Observabilidade** — diário do agente, métricas e batimento do motor
 - [x] **Concorrência** — trava por conversa, dedup de evento, teste com vários clientes
 - [x] **Modo autônomo** — manual / assistido / autônomo
+- [x] **Listas de clientes** — planilha com os valores reais, campos que o bot pode
+      falar, e porcentagem da redução
 
 Não existe ainda:
 
-- [ ] **Integração com o sistema do banco** — a única coisa que impede o agente de
-      responder valor sozinho. A interface está pronta (`consultar_simulacao`), e
-      hoje ela responde honestamente que o dado não está disponível
+- [ ] **Integração ao vivo com o sistema do banco** — a lista resolve o caso do cliente
+      que está na planilha; para quem não está, a pergunta continua indo pra Fila
 - [ ] **Instalador Windows** do motor
 
 ## Como iniciar
@@ -137,6 +141,7 @@ de novo sem quebrar nada. Separados, nesta ordem:
 | `16_handoff.sql` | Origem do rascunho, contador de escalonamentos, trava de loop |
 | `17_ferramentas.sql` | Registro das ferramentas executadas |
 | `18_observabilidade.sql` | Diário do agente, batimento do motor, métricas |
+| `19_listas.sql` | Listas de clientes, campos liberados, porcentagem |
 
 O `02` é o que isola os dados de cada consultor: a consulta no fim dele tem que mostrar
 `rls_ligado = true` e 4 políticas por tabela.
@@ -197,7 +202,7 @@ definição do registro e passar na validação.
 | `criar_followup` | sim | funcional (liga a cobrança; **quando** sai é do funil) |
 | `cancelar_followup` | sim | funcional |
 | `solicitar_intervencao` | sim | funcional |
-| `consultar_simulacao` | não | **sem integração** — responde `{disponivel: false}` e indica o próximo passo |
+| `consultar_simulacao` | não | funcional **quando o cliente está numa lista ativa**; senão responde `{disponivel: false}` |
 
 O modelo só pode escolher as de **leitura**. Escrever é decidir, e decidir continua no
 orquestrador. O `id_conversa` é preenchido pelo código, nunca pelo modelo: uma
@@ -206,6 +211,47 @@ alucinação de id leria os dados de outro cliente.
 Cinco proteções no executor: limite de 6 por ciclo, chamada repetida devolve o primeiro
 resultado sem re-executar, corte de 8 segundos, erro vira resposta em vez de exceção, e
 tudo fica registrado.
+
+## Listas de clientes
+
+Em **Listas** você sobe a planilha e o bot passa a ter os valores daqueles clientes. É a
+única fonte de valor que existe além de você.
+
+**Como acha o cliente:** pelo telefone do WhatsApp. A planilha precisa das colunas `DDD` e
+`Celular`. O motor procura pelo número inteiro (`55` + DDD + celular) e também pelos
+últimos 8 dígitos — o WhatsApp varia no nono dígito e no `55`, e casar só pelo número
+inteiro perderia cliente de verdade.
+
+**O que o bot pode falar:** nada, até você ligar. Os campos começam todos desligados —
+subir uma planilha não pode, sozinho, fazer o bot sair dizendo o saldo devedor de
+ninguém. Campo desligado não é escondido da mensagem: ele nem sai da consulta, então o
+redator não tem como vazá-lo.
+
+| Campo | Vem de |
+| --- | --- |
+| Redução total | `Reducao_Total` — **a porcentagem incide aqui** |
+| Margem livre | `Margem_Livre` |
+| Saldo devedor | `Saldo_Devedor_Total` |
+| Soma das parcelas | `Soma_Parcelas` |
+| Total de parcelas | `Total_Parcelas` |
+| Contratos | `Contrato_N`, `Taxa_N`, `Valor_Parcela_N`, `Parcelas_Pagas_N` |
+
+**A porcentagem:** você põe 66, e de uma redução de `R$ 3.174,54` o cliente ouve
+`R$ 2.095,20`. É multiplicação, e vale **só na redução total** — os outros campos saem
+como estão na planilha.
+
+A conta é feita no motor, antes de qualquer prompt. O modelo recebe o número já reduzido e
+não sabe que existiu outro. E o valor cheio não sobrevive em lugar nenhum: se o modelo
+escrever `3.174,54`, esse número não está em fonte nenhuma e o validator recusa.
+
+**Mensagem com valor da lista sempre espera sua aprovação**, mesmo em modo autônomo. O
+dado é real, mas ninguém conferiu se é o dado *daquela* pessoa — a planilha casa por
+telefone, e um telefone trocado numa linha vira o saldo de um cliente indo pro outro. Uma
+aprovação antes do primeiro número sair custa segundos; o contrário custa um cliente.
+
+**O bot não depende da lista.** Cliente fora dela, lista desligada, ou nenhum campo
+liberado: a pergunta vai pra Fila, exatamente como antes. A lista é atalho, nunca
+dependência.
 
 ## O validator
 
@@ -376,7 +422,16 @@ nunca em conversa silenciada, e **nunca em quem está esperando você**.
 npm test --prefix motor
 ```
 
-175 testes, sem rede e sem IA — rodam em segundos.
+200 testes, sem rede e sem IA — rodam em segundos.
+
+Além deles há verificação de ponta a ponta contra o Supabase e o Ollama reais:
+
+```bash
+npm run e2e --prefix motor
+```
+
+`e2e:banco` confere as migrations, `e2e:queda` derruba a IA de verdade e `e2e:lista`
+importa uma planilha e confere a conta da porcentagem. Todos limpam o que criam.
 
 | Arquivo | Cobre |
 | --- | --- |
@@ -392,6 +447,8 @@ npm test --prefix motor
 | `concorrencia.test.js` | Vários clientes, mensagens simultâneas, duplicadas |
 | `recuperacao.test.js` | Ollama/Groq/Supabase/WhatsApp fora, retry, disjuntor, peneira de segredo |
 | `agente.test.js` | Os três caminhos do fluxo, ponta a ponta |
+| `lista.test.js` | Porcentagem, campos liberados, telefone, e o valor cheio sendo recusado |
+| `redator.test.js` | O atalho que evita gerar texto que seria descartado |
 
 ## Publicar na Vercel
 
@@ -410,7 +467,7 @@ O `motor/` fica de fora do deploy: ele só existe na máquina do consultor.
 ```
 banco/            SQL: tabelas, RLS, migrations 01–18
 painel/           Next.js 16 + TypeScript + Tailwind v4
-  app/(painel)/   fila, rascunhos, conversas, atividade, meu-jeito, conexão, conta
+  app/(painel)/   fila, rascunhos, conversas, atividade, meu-jeito, listas, conexão, conta
   components/     marca, ui, fila, painel, conta, conversas, rascunhos, conexão
   lib/            clientes do Supabase, ações de servidor, tipos, leituras
   proxy.ts        sessão e rotas protegidas (era middleware.ts até o Next 15)
@@ -425,6 +482,7 @@ motor/
     classificar.js  regra rígida + Ollama, nessa ordem
     numeros.js      máscara dos exemplos e conferência de procedência
     memoria.js      o que o bot lembra de cada cliente
+    lista.js        a planilha do consultor: campos liberados e porcentagem
     requisitos.js   o que falta pra simular ou fechar — código puro
     redator.js      escreve no seu tom (few-shot)
     fluxo.js        o orquestrador: retrato → decisão → execução
@@ -443,7 +501,8 @@ motor/
       ferramentas.js  o registro: 11 ações com contrato
       executor.js     limite, dedup, timeout, erro, registro
       planejar.js     o modelo escolhe o que consultar (só leitura)
-  test/             175 testes
+  test/             200 testes
+  src/e2e/          verificação contra o sistema real
   sessao/           credenciais do pareamento — gitignorado
 ```
 

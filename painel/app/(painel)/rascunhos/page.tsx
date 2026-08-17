@@ -9,6 +9,7 @@ type LinhaDeRascunho = {
   id: string;
   texto_sugerido: string;
   categoria: string | null;
+  origem: string | null;
   criado_em: string;
   conversas: { nome: string | null; telefone: string } | null;
   pendencias: { pergunta: string } | null;
@@ -20,7 +21,7 @@ export default async function PaginaDeRascunhos() {
   const { data, error } = await supabase
     .from("rascunhos")
     .select(
-      "id, texto_sugerido, categoria, criado_em, conversas(nome, telefone), pendencias(pergunta)"
+      "id, texto_sugerido, categoria, origem, criado_em, conversas(nome, telefone), pendencias(pergunta)"
     )
     .eq("status", "pendente")
     .order("criado_em", { ascending: true })
@@ -75,6 +76,7 @@ export default async function PaginaDeRascunhos() {
               nome={r.conversas?.nome ?? "Sem nome"}
               telefone={r.conversas?.telefone ?? ""}
               categoria={r.categoria}
+              origem={r.origem}
               textoSugerido={r.texto_sugerido}
               perguntaOriginal={r.pendencias?.pergunta ?? null}
             />

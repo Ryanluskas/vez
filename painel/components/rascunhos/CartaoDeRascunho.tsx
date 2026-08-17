@@ -18,6 +18,7 @@ export function CartaoDeRascunho({
   nome,
   telefone,
   categoria,
+  origem,
   textoSugerido,
   perguntaOriginal,
 }: {
@@ -25,6 +26,8 @@ export function CartaoDeRascunho({
   nome: string;
   telefone: string;
   categoria: string | null;
+  /* De onde veio o numero: bot, sua resposta na Fila, ou uma lista. */
+  origem?: string | null;
   textoSugerido: string;
   perguntaOriginal: string | null;
 }) {
@@ -66,6 +69,15 @@ export function CartaoDeRascunho({
         <span className="text-[14px] text-texto">{nome}</span>
         <span className="num text-[12px] text-texto3">{telefone}</span>
         {categoria ? <span className="rotulo">{categoria}</span> : null}
+
+        {/* De onde saiu o numero. Vale a tela porque muda o que voce confere:
+            num rascunho da lista, o que se confere e se o cliente e mesmo
+            aquela pessoa — a planilha casa por telefone. */}
+        {origem === "lista" ? (
+          <span className="rounded-sm bg-fundo px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-jade">
+            valores da lista
+          </span>
+        ) : null}
       </div>
 
       {perguntaOriginal ? (

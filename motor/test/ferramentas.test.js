@@ -149,11 +149,49 @@ test("fato normal do cliente passa", () => {
   assert.equal(r.ok, true, r.problemas.join("; "));
 });
 
-test("a simulação diz que não existe, em vez de devolver número", async () => {
+test("sem lista configurada, a simulação diz que não tem o dado", async () => {
   const r = await FERRAMENTAS.consultar_simulacao.executar({ id_conversa: ID }, {});
   assert.equal(r.disponivel, false);
   assert.equal(r.proximo_passo, "solicitar_intervencao");
   assert.equal(/\d/.test(JSON.stringify(r)), false, "não pode ter número nenhum");
+});
+
+test("cliente fora de qualquer lista: não tem o dado", async () => {
+  const r = await FERRAMENTAS.consultar_simulacao.executar(
+    { id_conversa: ID },
+    {
+      supabase: bancoFalso({ conversas: { data: { telefone: "5596999999999" } } }),
+      lista: { valoresPara: async () => null },
+    }
+  );
+
+  assert.equal(r.disponivel, false);
+  assert.match(r.motivo, /não está em nenhuma lista/);
+  assert.equal(r.proximo_passo, "solicitar_intervencao");
+});
+
+test("cliente na lista: devolve só o que foi liberado", async () => {
+  const r = await FERRAMENTAS.consultar_simulacao.executar(
+    { id_conversa: ID },
+    {
+      supabase: bancoFalso({ conversas: { data: { telefone: "5596999630133" } } }),
+      lista: {
+        valoresPara: async () => ({
+          nome: "Abimael",
+          lista: "Amapá agosto",
+          porcentagem: 66,
+          valores: { reducao_total: "R$ 2.095,20" },
+          numeros: ["R$ 2.095,20"],
+          texto: "economia total: R$ 2.095,20",
+        }),
+      },
+    }
+  );
+
+  assert.equal(r.disponivel, true);
+  assert.equal(r.de, "Amapá agosto");
+  assert.equal(r.valores.reducao_total, "R$ 2.095,20");
+  assert.equal(r.valores.margem_livre, undefined, "campo não liberado não pode aparecer");
 });
 
 test("nenhuma ferramenta aceita argumento de valor, parcela ou taxa", () => {
@@ -369,7 +407,8 @@ test("o catálogo de leitura não expõe nenhuma escrita", () => {
   assert.equal(nomes.includes("solicitar_intervencao"), false);
 });
 
-test("o catálogo marca a simulação como indisponível", () => {
-  const simulacao = catalogo().find((f) => f.nome === "consultar_simulacao");
-  assert.equal(simulacao.disponivel, false);
+test("a simulação é leitura e está no catálogo do modelo", () => {
+  const simulacao = catalogo({ apenasLeitura: true }).find((f) => f.nome === "consultar_simulacao");
+  assert.ok(simulacao, "o modelo precisa poder consultar a lista");
+  assert.equal(FERRAMENTAS.consultar_simulacao.escrita, false);
 });

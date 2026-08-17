@@ -8,6 +8,7 @@ import { criarExecutor } from "./agente/executor.js";
 import { planejarConsultas, consultasEmTexto } from "./agente/planejar.js";
 import { EVENTOS, observadorMudo } from "./observar.js";
 import { criarTravas } from "./travas.js";
+import { criarLista } from "./lista.js";
 import { exemplosComBase } from "./estilo.js";
 import { log } from "./log.js";
 
@@ -20,6 +21,9 @@ const EXEMPLOS_NO_PROMPT = 3;
 
 export function criarFluxo(supabase, userId, { observador = observadorMudo() } = {}) {
   const memoria = criarMemoria(supabase, userId);
+
+  /* A planilha que o consultor subiu — a única fonte de valor que existe. */
+  const lista = criarLista(supabase, userId);
 
   /*
     Uma fila por conversa. Cliente ansioso manda três mensagens em três
@@ -353,6 +357,97 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
     );
   }
 
+  /*
+    ==================================================================
+    RESPONDER COM O QUE ESTÁ NA LISTA
+
+    A planilha faz aqui o papel que a sua resposta na Fila faz no
+    handoff: ela é o DADO, e o modelo só embrulha. Por isso reusa o
+    mesmo redator — `escreverComResposta` já sabe copiar número exato
+    sem acrescentar nenhum.
+
+    O que sai daqui NUNCA vai sozinho, nem em modo autônomo. O dado é
+    real, mas ninguém conferiu se é o dado DAQUELA pessoa: a planilha
+    casa por telefone, e telefone trocado vira saldo de um cliente indo
+    pro outro. Uma aprovação antes do primeiro número sair custa
+    segundos; o contrário custa um cliente.
+
+    Devolve false quando não deu pra escrever com segurança — e aí quem
+    chamou manda pra Fila, que é o caminho de sempre.
+    ==================================================================
+  */
+  async function responderComALista({
+    conversa,
+    nomeCliente,
+    pergunta,
+    contexto,
+    lembrado,
+    dados,
+    categoria,
+  }) {
+    const manual = await manualDaOperacao();
+    const exemplos = await exemplosDaCategoria(categoria);
+    const comecou = Date.now();
+
+    const texto = await escreverComResposta({
+      mensagemCliente: pergunta,
+      respostaDoConsultor: dados.texto,
+      nomeCliente: lembrado?.nome ?? nomeCliente,
+      exemplos,
+      manual,
+      memoria: memoria.emTexto(lembrado),
+    });
+
+    observador.registrar(EVENTOS.ESCREVEU, {
+      idConversa: conversa.id,
+      ok: !!texto,
+      detalhe: `com valores da lista "${dados.de}"`,
+      ms: Date.now() - comecou,
+    });
+
+    if (!texto) return false;
+
+    /*
+      A conferência de procedência com a lista como fonte. Todo número do
+      rascunho tem que estar no que a planilha devolveu — e a planilha já
+      devolveu tudo com a porcentagem aplicada. Se o modelo escrever o
+      valor cheio, ele não bate com nada e o rascunho é recusado.
+    */
+    const porta = validarAntesDeEnviar(texto, {
+      permitirNumeros: true,
+      fontesPermitidas: [dados.texto, pergunta, manual],
+      exemplos,
+      manual,
+      memoria: lembrado,
+      nomeCliente: lembrado?.nome ?? nomeCliente,
+      contextoDaConversa: contexto,
+      mensagemCliente: pergunta,
+    });
+
+    observador.registrar(EVENTOS.VALIDOU, {
+      idConversa: conversa.id,
+      ok: porta.ok,
+      detalhe: porta.ok ? "aprovada (valores da lista)" : `${porta.codigo}: ${porta.motivo}`,
+    });
+
+    if (!porta.ok) {
+      log.alerta(`Barrei o texto da lista (${porta.motivo}). Vai pra Fila.`);
+      return false;
+    }
+
+    await abrirRascunho({
+      idConversa: conversa.id,
+      texto,
+      categoria,
+      origem: "lista",
+    });
+
+    log.destaque(
+      `→ RASCUNHO  ${nomeCliente ?? ""} · valores da lista "${dados.de}" · esperando seu OK`
+    );
+    return true;
+  }
+
   async function abrirRascunho({
     idConversa,
     texto,
@@ -362,16 +457,26 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
     confianca = 1,
   }) {
     /*
-      Rascunho nascido de uma resposta SUA sai sem segunda aprovação: você
-      já aprovou quando respondeu na Fila. Pedir duas confirmações pro mesmo
-      dado é exatamente o atrito que faz largar a ferramenta.
+      Três procedências, três regras — e a diferença entre elas é quem já
+      olhou aquele dado:
 
-      O que segura a segurança aqui não é a aprovação — é a conferência de
-      procedência lá no redator: todo número do texto tem que estar na sua
-      resposta, senão o rascunho é recusado e sai o seu texto cru.
+        'consultor'  você respondeu na Fila. Sai sem segunda aprovação:
+                     você já aprovou quando respondeu, e pedir duas
+                     confirmações pro mesmo dado é o atrito que faz largar
+                     a ferramenta.
+
+        'lista'      o número é real, mas ninguém conferiu se é o número
+                     DAQUELA pessoa — a planilha casa por telefone. Sempre
+                     espera seu OK, em qualquer modo.
+
+        'bot'        depende do modo e da categoria.
     */
     const automatico =
-      origem === "consultor" ? true : await podeSairSozinho(categoria, confianca);
+      origem === "consultor"
+        ? true
+        : origem === "lista"
+          ? false
+          : await podeSairSozinho(categoria, confianca);
 
     const { error } = await supabase.from("rascunhos").insert({
       user_id: userId,
@@ -405,12 +510,14 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
     abrirPendencia,
     contextoDaConversa,
     observador,
+    lista,
   });
 
   return {
     executor,
     travas,
     observador,
+    lista,
 
     /* Grava a mensagem crua. Vale pros dois lados da conversa. */
     async registrar({ idConexao, idChat, idMensagem, telefone, nome, texto, direcao }) {
@@ -685,6 +792,39 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
       }
 
       if (decisao.acao === ACOES.PEDIR_AO_CONSULTOR) {
+        /*
+          ================================================================
+          ANTES DE TE CHAMAR, OLHA A LISTA
+
+          Se o cliente está numa planilha que você subiu, o dado que ia
+          faltar já existe. Não é o modelo inventando: é o número que você
+          apurou, com a porcentagem que você configurou, aplicada em código
+          antes de qualquer prompt.
+
+          Não achou? Segue o caminho de sempre — a pergunta vai pra Fila.
+          A lista é atalho, nunca dependência.
+          ================================================================
+        */
+        const daLista =
+          decisao.escalonamento === "valor"
+            ? await ciclo.usar("consultar_simulacao", { id_conversa: conversa.id })
+            : null;
+
+        if (daLista?.ok && daLista.dados.disponivel) {
+          const respondeu = await responderComALista({
+            conversa,
+            nomeCliente,
+            pergunta: texto,
+            contexto,
+            lembrado,
+            dados: daLista.dados,
+            categoria: decisao.categoria ?? "valor",
+          });
+
+          if (respondeu) return;
+          // Não deu pra escrever com segurança: cai pra Fila, como sempre.
+        }
+
         const chamada = await ciclo.usar("solicitar_intervencao", {
           id_conversa: conversa.id,
           pergunta: texto,

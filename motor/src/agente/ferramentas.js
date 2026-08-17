@@ -254,26 +254,57 @@ export const FERRAMENTAS = {
   },
 
   /*
-    A ferramenta que NÃO existe, declarada de propósito.
+    A ferramenta que era só um contrato vazio, e agora tem fonte.
 
-    Sem ela, o agente que precisa de um valor não tem nada pra "tentar" e o
-    orquestrador é quem carrega essa regra sozinho. Com ela, a resposta é
-    explícita e o próximo passo vem junto: chame o consultor.
+    O corpo mudou; o contrato não. Quem chama continua perguntando "você tem
+    o valor deste cliente?" e continua tratando `disponivel: false` como o
+    caminho normal — que é o que acontece sempre que o cliente não está em
+    nenhuma lista, ou o consultor não liberou campo nenhum.
 
-    Quando existir integração com o sistema do banco, o corpo muda e o
-    contrato fica. Nada mais no agente precisa saber.
+    Não existe integração com o sistema do banco. O que existe é a planilha
+    que o consultor apurou e subiu. A diferença importa: os números aqui são
+    de quando a planilha foi feita, não de agora.
   */
   consultar_simulacao: {
     escrita: false,
-    disponivel: false,
-    resumo: "Valor liberado, parcela, taxa e saldo. NÃO EXISTE integração: sempre indisponível.",
+    resumo: "Valores deste cliente, se ele estiver numa lista que você subiu.",
     argumentos: { id_conversa: { tipo: "uuid", obrigatorio: true } },
 
-    async executar() {
+    async executar({ id_conversa }, { supabase, lista }) {
+      if (!lista) {
+        return {
+          disponivel: false,
+          motivo: "nenhuma lista configurada",
+          proximo_passo: "solicitar_intervencao",
+        };
+      }
+
+      const { data: conversa } = await supabase
+        .from("conversas")
+        .select("telefone")
+        .eq("id", id_conversa)
+        .maybeSingle();
+
+      const achado = conversa?.telefone ? await lista.valoresPara(conversa.telefone) : null;
+
+      if (!achado) {
+        return {
+          disponivel: false,
+          motivo: "este cliente não está em nenhuma lista ativa; o valor só você tem",
+          proximo_passo: "solicitar_intervencao",
+        };
+      }
+
+      /*
+        Os números saem daqui JÁ com a porcentagem aplicada. O modelo nunca
+        vê o valor cheio, então não tem como "arredondar de volta" pra ele.
+      */
       return {
-        disponivel: false,
-        motivo: "não existe integração com o sistema do banco; esse número só o consultor tem",
-        proximo_passo: "solicitar_intervencao",
+        disponivel: true,
+        de: achado.lista,
+        nome_na_lista: achado.nome,
+        valores: achado.valores,
+        texto: achado.texto,
       };
     },
   },

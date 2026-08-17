@@ -26,6 +26,8 @@ export function Rail({
   ];
 
   const ajustes: Item[] = [
+    // As listas ficam em ajustes: sobe uma vez por mês, não é rotina diária.
+    { href: "/listas", nome: "Listas" },
     { href: "/conexao", nome: "Conexão" },
     { href: "/conta", nome: "Conta" },
   ];
