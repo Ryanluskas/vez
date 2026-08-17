@@ -96,6 +96,29 @@ const OBVIAS = [
       "i"
     ),
   ],
+  /*
+    Prazo. "Quanto tempo demora" é a pergunta mais repetida do ramo, e a
+    resposta está no seu manual — não depende de nenhum dado do cliente.
+
+    Ela ia parar no modelo, que devolvia "precisa do consultor", e aí o
+    agente pedia o extrato de margem pra responder quanto tempo demora. O
+    cliente perguntava sobre prazo e recebia pedido de documento.
+
+    "Quanto tempo" nunca é dinheiro — o gatilho já tem essa exceção
+    explícita, e ela existe desde o começo pelo mesmo motivo.
+  */
+  [
+    "prazo",
+    new RegExp(
+      `^(?:${SAUDACAO}${FIM})?` +
+        `(?:(?:e\\s+)?(?:depois que (?:eu )?assin\\w+[,\\s]+)?)?` +
+        `(?:quanto tempo|demora quanto|em quantos? dias?|quando (?:que )?(?:cai|entra|fica pronto|sai))` +
+        `(?:\\s+(?:demora|leva|dura|cai|caem|entra|[ée]|vai|pra|para|pro|o|a|de|em|at[ée]|` +
+        `cair|entrar|ficar|sair|pronto|dinheiro|dep[oó]sito|liberar|na conta|conta))*` +
+        `${FIM}$`,
+      "i"
+    ),
+  ],
 ];
 
 export function classificarPorRegra(texto) {

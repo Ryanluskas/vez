@@ -115,7 +115,11 @@ npm run diagnostico --prefix motor
 | `VEZ_EMAIL` / `VEZ_SENHA` | sim | Sua conta no painel |
 | `OLLAMA_MODELO` | não | Padrão `llama3.2:3b` |
 | `OLLAMA_URL` | não | Padrão `http://localhost:11434` |
-| `GROQ_API_KEY` | não | Liga o modelo grande para redigir |
+| `GROQ_API_KEY` | não | Liga o modelo grande para redigir. Sem ela o local escreve, mais devagar |
+| `GROQ_TIMEOUT_MS` | não | Padrão `8000`. Medido: ~500ms por mensagem |
+| `OLLAMA_TIMEOUT_PENSAR_MS` | não | Padrão `12000`. Classificar/extrair com modelo quente leva 4–6s |
+| `OLLAMA_TIMEOUT_ESCREVER_MS` | não | Padrão `35000` |
+| `VEZ_PENSAR_NA_NUVEM` | não | `1` deixa o Groq classificar quando o local falha. Desligado: essas chamadas veem a mensagem crua do cliente |
 | `GROQ_MODELO` | não | Padrão `llama-3.3-70b-versatile` |
 | `VEZ_PLANEJADOR` | não | `0` desliga o planejador (uma chamada de IA a menos por resposta) |
 | `WA_VERSAO_HTML` | não | Prende o WhatsApp Web numa versão conhecida |
@@ -171,7 +175,8 @@ que protege isso é o texto ser fixo, escrito à mão, sem número e sem IA no m
 
 | Papel | Modelo | Por quê |
 | --- | --- | --- |
-| **Pensar** — classificar, extrair fato, escolher ferramenta | Ollama local | Vê a mensagem crua, inclusive quando fala de dinheiro. Não sai da máquina |
+| **Decidir o óbvio** — saudação, prazo, convênio, banco, documento | **Código** (`extrair.js`, `classificar.js`) | Não é interpretação de linguagem, é reconhecimento de palavra. Microssegundos, e não erra |
+| **Pensar** — o que a regra não resolveu | Ollama local | Vê a mensagem crua, inclusive quando fala de dinheiro. Não sai da máquina |
 | **Escrever** — a mensagem que o cliente lê | Groq, se houver chave; senão o local | Em modo autônomo isso sai sem ninguém ler antes; qualidade importa |
 
 Trocáveis por variável de ambiente, sem tocar na lógica. Sem `GROQ_API_KEY` tudo
@@ -182,6 +187,31 @@ testada. O brief original pedia um agente devolvendo `{action, confidence}` em J
 mas medindo o `llama3.2:3b` nessa tarefa, ele mistura `R$` com `%`, copia número de
 exemplo e responde "Não sei" pro cliente. Construir a parte mais crítica do produto
 sobre a parte menos confiável dele seria um erro caro.
+
+## Quando a IA falha
+
+O cliente nunca fica no silêncio. Toda falha de geração — Ollama fora, Groq fora,
+tempo estourado, texto recusado pelo validator — cai numa das duas saídas:
+
+```
+IA falha
+   ↓
+existe resposta determinística?  →  sim  →  responde
+   ↓                                         (saudação, confirmação de informação,
+  não                                         documento recebido, pedido do que falta)
+   ↓
+avisa o cliente que vai verificar  +  manda pra Fila
+```
+
+O aviso não responde a pergunta: diz que a mensagem chegou e que alguém vai olhar —
+que é o que é verdade. Nenhuma resposta determinística tem dígito; `respostas.js`
+confere isso na saída, além de todas terem sido escritas à mão.
+
+**Nunca inventa pra evitar o handoff.** Sem fonte real, o caso é seu.
+
+O caminho de escrita tenta, nesta ordem: **Groq** (8s) → **Ollama local** (35s) →
+**resposta determinística** → **aviso + Fila**. Classificar e extrair tentam a
+**regra primeiro** e só chamam o modelo local (12s) pelo que sobrou.
 
 ## As ferramentas
 
@@ -422,7 +452,7 @@ nunca em conversa silenciada, e **nunca em quem está esperando você**.
 npm test --prefix motor
 ```
 
-200 testes, sem rede e sem IA — rodam em segundos.
+256 testes, sem rede e sem IA — rodam em segundos.
 
 Além deles há verificação de ponta a ponta contra o Supabase e o Ollama reais:
 
@@ -447,6 +477,8 @@ importa uma planilha e confere a conta da porcentagem. Todos limpam o que criam.
 | `concorrencia.test.js` | Vários clientes, mensagens simultâneas, duplicadas |
 | `recuperacao.test.js` | Ollama/Groq/Supabase/WhatsApp fora, retry, disjuntor, peneira de segredo |
 | `agente.test.js` | Os três caminhos do fluxo, ponta a ponta |
+| `extrair.test.js` | As nove frases que o modelo errava, e o óbvio decidido por código |
+| `fallback.test.js` | IA caída nos seis estados, resposta sem IA, e o cliente nunca no silêncio |
 | `lista.test.js` | Porcentagem, campos liberados, telefone, e o valor cheio sendo recusado |
 | `redator.test.js` | O atalho que evita gerar texto que seria descartado |
 
@@ -483,6 +515,8 @@ motor/
     numeros.js      máscara dos exemplos e conferência de procedência
     memoria.js      o que o bot lembra de cada cliente
     lista.js        a planilha do consultor: campos liberados e porcentagem
+    extrair.js      convênio, banco, nome e objetivo por regra — sem modelo
+    respostas.js    o que dá pra responder sem IA nenhuma
     requisitos.js   o que falta pra simular ou fechar — código puro
     redator.js      escreve no seu tom (few-shot)
     fluxo.js        o orquestrador: retrato → decisão → execução
@@ -501,7 +535,7 @@ motor/
       ferramentas.js  o registro: 11 ações com contrato
       executor.js     limite, dedup, timeout, erro, registro
       planejar.js     o modelo escolhe o que consultar (só leitura)
-  test/             200 testes
+  test/             256 testes
   src/e2e/          verificação contra o sistema real
   sessao/           credenciais do pareamento — gitignorado
 ```

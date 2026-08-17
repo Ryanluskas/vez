@@ -9,6 +9,7 @@ import { planejarConsultas, consultasEmTexto } from "./agente/planejar.js";
 import { EVENTOS, observadorMudo } from "./observar.js";
 import { criarTravas } from "./travas.js";
 import { criarLista } from "./lista.js";
+import * as respostas from "./respostas.js";
 import { exemplosComBase } from "./estilo.js";
 import { log } from "./log.js";
 
@@ -333,8 +334,16 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
       memoria: memoria.emTexto(lembrado),
     });
 
-    // Redator falhou: manda o pedido cru, que já é uma frase inteira.
-    const mensagem = texto ?? `Oi! Pra eu continuar, ${pedido.texto}.`;
+    /*
+      A IA aqui é enfeite, não estrutura. O QUE pedir vem de
+      `requisitos.js`, que é código; o modelo só deixa a frase mais
+      natural. Falhou, sai a versão determinística — mesma informação,
+      escrita à mão, sem esperar ninguém.
+    */
+    const mensagem =
+      texto ??
+      respostas.pedirOQueFalta(pedido, lembrado?.nome ?? nomeCliente) ??
+      `Oi! Pra eu continuar, ${pedido.texto}.`;
 
     await memoria.registrarPergunta(conversa.id, pedido.chaves);
     await memoria.registrarAcao(
@@ -446,6 +455,95 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
       `→ RASCUNHO  ${nomeCliente ?? ""} · valores da lista "${dados.de}" · esperando seu OK`
     );
     return true;
+  }
+
+  /*
+    ==================================================================
+    O CLIENTE NUNCA FICA NO SILÊNCIO
+
+    Antes, quando a IA falhava, a conversa ia pra Fila e pronto: o
+    cliente mandou uma pergunta e não recebia NADA até o consultor abrir
+    o painel. Do lado dele, isso é indistinguível de ter sido ignorado —
+    e é o que faz procurar outro consultor.
+
+    Agora todo caminho que termina em Fila manda antes um aviso curto.
+    Ele não responde a pergunta, não promete valor, não promete prazo:
+    diz que a mensagem chegou e que alguém vai olhar. Que é a verdade.
+
+    Sai em QUALQUER modo, inclusive manual, pela mesma razão que o
+    follow-up sai: texto fixo, escrito à mão, sem número, sem IA no
+    meio. Um aviso que espera aprovação não é aviso — quando o consultor
+    aprovar, o cliente já foi embora.
+
+    Uma vez por conversa por vez: se ele já está esperando, não precisa
+    ouvir de novo a cada mensagem que manda.
+  */
+  async function avisarQueVaiVerificar({ conversa, nomeCliente, lembrado }) {
+    const texto = respostas.conferido(
+      respostas.vouVerificar(lembrado?.nome ?? nomeCliente, Date.now())
+    );
+
+    if (!texto) return false;
+
+    const { error } = await supabase.from("rascunhos").insert({
+      user_id: userId,
+      id_conversa: conversa.id,
+      texto_sugerido: texto,
+      categoria: "saudacao",
+      status: "aprovado",
+      // Não é exemplo do jeito dele de falar: é texto meu, fixo.
+      automatico: true,
+      origem: "bot",
+    });
+
+    if (error) {
+      log.erro(`Não consegui avisar o cliente: ${error.message}`);
+      return false;
+    }
+
+    observador.registrar(EVENTOS.ENVIADA, {
+      idConversa: conversa.id,
+      detalhe: "aviso de que vai verificar (fallback)",
+    });
+
+    return true;
+  }
+
+  /*
+    Manda pra Fila SEMPRE avisando o cliente antes.
+
+    Todo `solicitar_intervencao` do orquestrador passa por aqui. É o
+    único jeito de garantir que não sobre um caminho em que a conversa
+    congela em silêncio — se fosse opcional, o próximo caminho novo
+    esqueceria.
+  */
+  async function mandarProConsultor({
+    ciclo,
+    conversa,
+    nomeCliente,
+    lembrado,
+    pergunta,
+    motivo,
+    categoria,
+    avisar = true,
+  }) {
+    const chamada = await ciclo.usar("solicitar_intervencao", {
+      id_conversa: conversa.id,
+      pergunta,
+      motivo,
+      categoria: categoria ?? "outro",
+    });
+
+    /*
+      Avisa só quando a pendência é NOVA. Pendência duplicada significa
+      que ele já foi avisado — repetir "já te respondo" a cada mensagem
+      é pior que não dizer nada.
+    */
+    if (avisar && chamada.ok && chamada.dados?.id) {
+      await avisarQueVaiVerificar({ conversa, nomeCliente, lembrado });
+    }
+
+    return chamada;
   }
 
   async function abrirRascunho({
@@ -825,8 +923,11 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
           // Não deu pra escrever com segurança: cai pra Fila, como sempre.
         }
 
-        const chamada = await ciclo.usar("solicitar_intervencao", {
-          id_conversa: conversa.id,
+        const chamada = await mandarProConsultor({
+          ciclo,
+          conversa,
+          nomeCliente,
+          lembrado,
           pergunta: texto,
           motivo: decisao.motivo,
           categoria: decisao.categoria ?? "outro",
@@ -884,6 +985,52 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
       const categoria = decisao.categoria;
 
       /*
+        ================================================================
+        CLASSIFICAR ≠ ESCREVER
+
+        O código já sabe o que o cliente quer. Em alguns casos ele
+        também sabe o que responder, e aí não existe motivo pra chamar
+        modelo nenhum: "bom dia" tem uma resposta certa, e ela não muda
+        conforme a interpretação.
+
+        Isto vem ANTES da IA, não depois. Antes era o contrário — a IA
+        tentava, demorava 30 segundos e às vezes falhava, e só então
+        caía num texto fixo. O caminho mais comum do atendimento estava
+        passando pela peça mais frágil sem precisar.
+
+        Nenhuma resposta daqui tem número. `respostas.js` confere isso
+        na saída, além de eu ter escrito todas à mão.
+        ================================================================
+      */
+      const semIa = respostas.respostaDeterministica({
+        categoria,
+        mensagemCliente: texto,
+        nomeCliente: lembrado?.nome ?? nomeCliente,
+        fatosNovos: novosFatos,
+        semente: Date.now(),
+      });
+
+      if (semIa) {
+        observador.registrar(EVENTOS.ESCREVEU, {
+          idConversa: conversa.id,
+          detalhe: `${categoria} · sem IA`,
+          ms: 0,
+        });
+
+        const sozinhoSemIa = await abrirRascunho({
+          idConversa: conversa.id,
+          texto: semIa,
+          categoria,
+          confianca: decisao.confianca,
+        });
+
+        log.info(
+          `→ ${sozinhoSemIa ? "RESPONDENDO" : "rascunho"}  ${nomeCliente ?? ""} · ${categoria} · sem IA`
+        );
+        return;
+      }
+
+      /*
         Aqui, e só aqui, o modelo escolhe ferramenta. Ele lê a mensagem e
         diz o que precisa consultar pra responder — o trecho do manual que
         fala do assunto, o que ainda falta do cliente.
@@ -910,8 +1057,14 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
         consultas: consultasEmTexto(consultas),
       });
 
-      // O bot achou que sabia, mas na hora de escrever nao soube sem chutar.
-      // Isso nao e falha: e o produto funcionando. Vai pra fila.
+      /*
+        A IA não produziu nada que preste — caiu, estourou o tempo, ou
+        escreveu algo que o guarda recusou.
+
+        Isso não é falha do produto: é o produto se recusando a chutar.
+        Mas o cliente não pode pagar por isso com silêncio. Vai pra Fila
+        E recebe o aviso de que alguém vai olhar.
+      */
       if (!rascunho) {
         observador.registrar(EVENTOS.ESCREVEU, {
           idConversa: conversa.id,
@@ -919,13 +1072,18 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
           detalhe: "não soube responder sem chutar",
           ms: Date.now() - comecouAEscrever,
         });
-        await ciclo.usar("solicitar_intervencao", {
-          id_conversa: conversa.id,
+
+        await mandarProConsultor({
+          ciclo,
+          conversa,
+          nomeCliente,
+          lembrado,
           pergunta: texto,
           motivo: "o bot não soube responder sem chutar",
           categoria,
         });
-        log.info(`→ fila  ${nomeCliente ?? ""} · o bot não soube escrever`);
+
+        log.info(`→ fila  ${nomeCliente ?? ""} · o bot não soube escrever (avisei o cliente)`);
         return;
       }
 
@@ -975,15 +1133,24 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
           injeção são de outra natureza: alguém tem que olhar.
         */
         if (porta.paraOConsultor) {
-          await ciclo.usar("solicitar_intervencao", {
-            id_conversa: conversa.id,
+          await mandarProConsultor({
+            ciclo,
+            conversa,
+            nomeCliente,
+            lembrado,
             pergunta: texto,
             motivo: `resposta barrada — ${porta.motivo}`,
             categoria,
           });
           log.destaque(`→ FILA  ${nomeCliente ?? ""} · ${porta.codigo}`);
         } else {
+          /*
+            Malformado e repergunta o bot causou sozinho. A conversa
+            volta pra ele, mas o cliente não pode ficar sem nada —
+            ele mandou uma mensagem e ninguém respondeu.
+          */
           await mudarEstagio(conversa.id, "aguardando_bot");
+          await avisarQueVaiVerificar({ conversa, nomeCliente, lembrado });
         }
         return;
       }
@@ -1017,6 +1184,24 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
       const exemplos = await exemplosDaCategoria(pendencia.categoria ?? "outro");
       const manual = await manualDaOperacao();
       const lembrado = await memoria.ler(pendencia.id_conversa);
+
+      /*
+        Descarta o aviso de "já te respondo" que ainda não saiu.
+
+        Ele foi enfileirado quando o caso subiu pra Fila. Agora a resposta
+        de verdade está chegando — e o cliente receber "deixa eu confirmar
+        uma coisa" DEPOIS de receber o valor é pior que não ter recebido
+        aviso nenhum. Aconteceu no teste de ponta a ponta.
+
+        A sua resposta ganha de qualquer coisa que o bot tenha enfileirado
+        antes dela.
+      */
+      await supabase
+        .from("rascunhos")
+        .update({ status: "descartado" })
+        .eq("id_conversa", pendencia.id_conversa)
+        .eq("status", "aprovado")
+        .is("enviado_em", null);
 
       const texto = await escreverComResposta({
         mensagemCliente: pendencia.pergunta,

@@ -7,6 +7,7 @@ import {
   nomeDe,
   objetivoDe,
   aindaFalta,
+  pareceTerFato,
 } from "../src/extrair.js";
 import { classificarPorRegra } from "../src/classificar.js";
 import { checarGatilhos } from "../src/gatilhos.js";
@@ -237,5 +238,59 @@ test("cumprimentos combinados não gastam modelo", () => {
 test("saudação grudada em pergunta de dinheiro não é saudação", () => {
   for (const frase of ["oi, quanto libera?", "bom dia, qual a parcela?", "boa tarde, quanto eu pego?"]) {
     assert.equal(classificarPorRegra(frase), null, `"${frase}" foi liberado como saudação`);
+  }
+});
+
+test("saudação não gasta chamada de modelo tentando achar fato", () => {
+  /*
+    Medido: "oi, boa tarde" gastava 18 segundos de modelo procurando nome,
+    convênio, banco e objetivo — e voltava vazio, porque saudação não tem
+    fato nenhum.
+
+    Faltar campo não basta pra justificar a chamada: no começo da conversa
+    falta TUDO, e é justamente quando chegam as mensagens mais curtas.
+  */
+  for (const frase of ["oi", "bom dia", "oi, boa tarde", "obrigado!", "ok", "beleza", "sim"]) {
+    assert.equal(pareceTerFato(frase), false, `"${frase}" ia gastar uma chamada à toa`);
+  }
+});
+
+test("frase com fato continua indo pro modelo quando a regra não resolve", () => {
+  for (const frase of [
+    "trabalho numa empresa de ônibus há 12 anos",
+    "meu contrato é naquele banco do interior",
+    "recebo pela folha da câmara municipal",
+  ]) {
+    assert.equal(pareceTerFato(frase), true, `"${frase}" ia ser descartada sem tentar`);
+  }
+});
+
+test("prazo se resolve por código: é a pergunta mais repetida do ramo", () => {
+  /*
+    "Quanto tempo demora pra cair?" ia pro modelo, voltava como "precisa do
+    consultor", e o agente pedia o extrato de margem pra responder quanto
+    tempo demora. O cliente perguntava prazo e recebia pedido de documento.
+  */
+  for (const frase of [
+    "quanto tempo demora?",
+    "quanto tempo demora pra cair?",
+    "depois que assina, quanto tempo demora pra cair?",
+    "em quantos dias cai?",
+    "quando cai o dinheiro?",
+    "demora quanto?",
+  ]) {
+    const r = classificarPorRegra(frase);
+    assert.ok(r, `"${frase}" foi pro modelo`);
+    assert.equal(r.categoria, "prazo", `"${frase}"`);
+    assert.equal(r.precisaDoRyan, false, "prazo genérico não depende de dado seu");
+  }
+});
+
+test("prazo colado em pergunta de dinheiro não é prazo", () => {
+  for (const frase of [
+    "quanto tempo demora e quanto eu pego?",
+    "quanto tempo você trabalha nisso e quanto sai pra mim?",
+  ]) {
+    assert.equal(classificarPorRegra(frase), null, `"${frase}" foi liberado`);
   }
 });

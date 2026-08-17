@@ -1,6 +1,6 @@
 import { pensar } from "./ia.js";
 import { REQUISITOS } from "./requisitos.js";
-import { extrairPorRegra, aindaFalta } from "./extrair.js";
+import { extrairPorRegra, aindaFalta, pareceTerFato } from "./extrair.js";
 import { log } from "./log.js";
 
 /*
@@ -186,6 +186,13 @@ export function criarMemoria(supabase, userId) {
     const porRegra = extrairPorRegra(texto);
 
     if (!aindaFalta(memoriaAtual, porRegra)) return porRegra;
+
+    /*
+      Faltar campo não basta pra justificar a chamada. No começo da conversa
+      falta TUDO — e é exatamente quando chegam as mensagens mais curtas.
+      "Oi, boa tarde" gastava 18 segundos de modelo pra voltar vazio.
+    */
+    if (!pareceTerFato(texto)) return porRegra;
 
     const bruto = await pensar({
       sistema: SISTEMA_DA_EXTRACAO,

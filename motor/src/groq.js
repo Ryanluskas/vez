@@ -23,7 +23,17 @@ import { log } from "./log.js";
 const ENDERECO = "https://api.groq.com/openai/v1/chat/completions";
 const MODELO = process.env.GROQ_MODELO || "llama-3.3-70b-versatile";
 const CHAVE = process.env.GROQ_API_KEY;
-const PACIENCIA_MS = 30_000;
+/*
+  Medido nesta conta: 528ms pra escrever uma saudação com o
+  llama-3.3-70b-versatile. Trinta segundos de paciência era um número
+  escolhido sem medir nada.
+
+  Oito segundos são quinze vezes o tempo normal — folga de sobra pra rede
+  ruim, e curto o bastante pra sobrar tempo de tentar o modelo local antes
+  de o cliente desistir. Passar disso não vira resposta chutada: vira o
+  local, e depois a resposta determinística, e depois a Fila.
+*/
+const PACIENCIA_MS = Number(process.env.GROQ_TIMEOUT_MS) || 8_000;
 
 export const groqConfigurado = Boolean(CHAVE);
 export const modeloDoGroq = MODELO;

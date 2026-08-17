@@ -144,10 +144,26 @@ export function criarEscuta({ supabase, fluxo, maestro, userId, observador = obs
       texto: rascunho.texto_sugerido,
     });
 
+    /*
+      Enviar não significa que o caso foi resolvido.
+
+      O aviso de "já te respondo" também sai por aqui, e ele acontece
+      JUSTAMENTE quando a conversa acabou de ser congelada pra você. Marcar
+      'respondido' ali apagava o "travada com você" — a pendência continuava
+      na Fila, mas a conversa sumia do filtro em Conversas.
+
+      Com pendência aberta, o estágio fica como está.
+    */
+    const { count: esperandoVoce } = await supabase
+      .from("pendencias")
+      .select("id", { count: "exact", head: true })
+      .eq("id_conversa", conversa.id)
+      .eq("status", "aberta");
+
     await supabase
       .from("conversas")
       .update({
-        estagio: "respondido",
+        ...((esperandoVoce ?? 0) > 0 ? {} : { estagio: "respondido" }),
         ultima_mensagem: rascunho.texto_sugerido,
         atualizado_em: agora,
       })

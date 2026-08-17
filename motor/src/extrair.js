@@ -222,3 +222,33 @@ export function aindaFalta(memoria, achados) {
   const campos = ["nome", "convenio", "banco", "objetivo"];
   return campos.some((c) => !memoria?.[c] && !achados?.[c]);
 }
+
+/*
+  Esta mensagem tem CARA de conter algum fato sobre o cliente?
+
+  Medido no teste de ponta a ponta: "oi, boa tarde" gastava 18 segundos de
+  modelo tentando extrair nome, convênio, banco e objetivo de uma saudação
+  — e voltava vazio, porque saudação não tem fato nenhum.
+
+  Faltar campo não é motivo suficiente pra chamar o modelo. No começo da
+  conversa falta TUDO, e é justamente quando chegam as mensagens mais
+  curtas e mais vazias.
+*/
+const SO_CUMPRIMENTO =
+  /^(?:oi+|ol[aá]|opa|e a[ií]|bom dia|boa tarde|boa noite|tudo bem|tudo bom|blz|beleza|obrigad[oa]|vlw|valeu|ok|certo|sim|n[aã]o|show|legal|perfeito|entendi)[\s!?.,…]*$/i;
+
+export function pareceTerFato(texto) {
+  const t = String(texto ?? "").trim();
+  if (!t) return false;
+
+  /*
+    Cumprimento sozinho, ou combinação de cumprimentos, não carrega fato.
+    Testo cada pedaço separado por vírgula porque "oi, boa tarde" são dois
+    cumprimentos, e nenhum dos dois diz nada sobre o cliente.
+  */
+  const pedacos = t.split(/[,;]+/).map((p) => p.trim()).filter(Boolean);
+  if (pedacos.length && pedacos.every((p) => SO_CUMPRIMENTO.test(p))) return false;
+
+  // Frase curta demais pra conter "sou do INSS" ou "meu nome é X".
+  return t.length >= 10;
+}

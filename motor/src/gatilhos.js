@@ -37,11 +37,21 @@ function normalizar(texto) {
   Foi exatamente essa segunda forma que passou batido no primeiro teste.
 */
 /*
-  "quanto tempo" e a unica excecao segura: pergunta de prazo de entrega, e a
-  resposta ("1 a 2 dias uteis") nao tem cifra nenhuma. Fora essa, todo "quanto"
-  perto de verbo de dinheiro trava.
+  As unicas excecoes seguras sao unidades de TEMPO: "quanto tempo demora",
+  "em quantos dias cai". Sao perguntas de prazo, e a resposta ("1 a 2 dias
+  uteis") nao tem cifra nenhuma.
+
+  "dias" e "horas" entraram depois: "em quantos dias cai?" casava com
+  quanto+cai e ia pra Fila. Ir pra Fila e o lado seguro do erro, mas era
+  erro — o cliente perguntava prazo e recebia pedido de documento.
+
+  NAO entram aqui: meses, parcelas, vezes. "Em quantos meses fica" e
+  pergunta de prazo de CONTRATO, que e dinheiro.
+
+  Fora dessas, todo "quanto" perto de verbo de dinheiro trava.
 */
-const QUANTO = "(?:quanto|quantos|quanta|qnt|qto)(?!\\s+tempo)";
+const UNIDADE_DE_TEMPO = "(?:tempo|dias?|horas?)";
+const QUANTO = `(?:quanto|quantos|quanta|qnt|qto)(?!\\s+${UNIDADE_DE_TEMPO}\\b)`;
 /*
   As conjugacoes estao escritas uma a uma, e isso tem custo: "pega" e "pegar"
   estavam aqui, "pego" nao — e "quanto eu pego?" passava batido pela regra de
@@ -97,7 +107,13 @@ const GATILHOS = [
   },
   {
     motivo: "perguntou prazo de pagamento",
-    padrao: /\b(quantas vezes|em quantas|prazo|meses|parcelado em|x de)\b/,
+    /*
+      "Em quantas" foi escrito pra pegar "em quantas parcelas" e "em
+      quantas vezes" — prazo de CONTRATO, que é dinheiro. Ele pegava
+      junto "em quantas horas entra?", que é prazo de ENTREGA e não tem
+      cifra nenhuma. O lookahead separa os dois.
+    */
+    padrao: /\b(quantas vezes|em quantas(?!\s+(?:horas?|semanas?))|prazo|meses|parcelado em|x de)\b/,
   },
   {
     motivo: "citou um valor em reais",

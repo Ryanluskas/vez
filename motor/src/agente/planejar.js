@@ -33,9 +33,20 @@ import { log } from "../log.js";
    resposta e só faz o cliente esperar. */
 const MAXIMO_NO_PLANO = 3;
 
-/* Desligável sem mexer no código: em máquina lenta, uma chamada a menos
-   por mensagem é a diferença entre responder em 6s ou em 12s. */
-export const planejadorLigado = process.env.VEZ_PLANEJADOR !== "0";
+/*
+  DESLIGADO POR PADRÃO, e isso mudou depois de medir.
+
+  O planejador custa uma chamada do modelo local por resposta — 12 a 46
+  segundos nesta máquina, medidos. Em troca, ele escolhe o que consultar.
+
+  Só que a ferramenta que ele mais usa, `buscar_conhecimento`, procura no
+  manual… que já entra INTEIRO em todo prompt do redator. Ele estava
+  pagando o passo mais caro do caminho pra buscar o que já estava lá.
+
+  Ligue com VEZ_PLANEJADOR=1 quando o manual ficar grande demais pra caber
+  no prompt — aí a busca passa a valer o que custa.
+*/
+export const planejadorLigado = process.env.VEZ_PLANEJADOR === "1";
 
 function montarSistema() {
   const lista = catalogo({ apenasLeitura: true })

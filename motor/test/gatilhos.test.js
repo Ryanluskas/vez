@@ -116,3 +116,25 @@ test("prazo continua passando: 'quanto tempo' não é dinheiro", () => {
     assert.equal(checarGatilhos(p).travou, false, `"${p}" travou à toa`);
   }
 });
+
+test("unidade de tempo não é dinheiro; unidade de contrato é", () => {
+  /*
+    "Em quantos dias cai?" casava com quanto+cai e ia pra Fila. Ir pra Fila
+    é o lado seguro do erro, mas era erro: o cliente perguntava prazo e
+    recebia pedido de documento.
+
+    "Meses" e "parcelas" ficam de fora da exceção de propósito — "em
+    quantos meses fica" é prazo de CONTRATO, e isso é dinheiro.
+  */
+  for (const p of ["quanto tempo demora?", "em quantos dias cai?", "em quantas horas entra?"]) {
+    assert.equal(checarGatilhos(p).travou, false, `"${p}" travou à toa`);
+  }
+
+  for (const p of [
+    "em quantos meses fica?",
+    "em quantas parcelas cabe?",
+    "em quantas vezes posso pagar?",
+  ]) {
+    assert.equal(checarGatilhos(p).travou, true, `"${p}" passou batido — isso é dinheiro`);
+  }
+});
