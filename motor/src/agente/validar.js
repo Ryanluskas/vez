@@ -195,36 +195,48 @@ export function veioDoExemplo(inventados, exemplos) {
   exemplos mas não nesta conversa, o modelo copiou o exemplo inteiro. O
   cliente receberia uma mensagem endereçada a outra pessoa.
 */
-const PALAVRAS_QUE_COMECAM_FRASE = new Set([
-  "Oi", "Olá", "Ola", "Bom", "Boa", "Consegui", "Já", "Ja", "Pra", "Para",
-  "Quer", "Vou", "Vamos", "Sim", "Não", "Nao", "Oi!", "Oba", "Show",
-  "Oi,", "Perfeito", "Certo", "Oque", "Qualquer", "Oi.", "Assim", "Como",
-  "Esse", "Essa", "Este", "Esta", "Isso", "Aqui", "Ai", "Aí", "Depois",
-  "Obrigado", "Obrigada", "Beleza", "Legal", "Ótimo", "Otimo", "Só", "So",
-  "Me", "Te", "Seu", "Sua", "INSS", "WhatsApp",
-]);
+/*
+  Nome em POSIÇÃO DE VOCATIVO: no começo da mensagem, seguido de vírgula.
+  "Marlene, consegui liberar…" — é assim que o consultor chama o cliente, e
+  é a única posição em que dá pra afirmar que uma palavra maiúscula é gente.
 
-function primeirosNomes(texto) {
+  A primeira versão disto pegava qualquer palavra capitalizada com 3+ letras
+  e descontava uma lista de palavras comuns. O teste de ponta a ponta matou
+  essa ideia em quinze minutos: o modelo escreveu "Tudo bem?", "Tudo" não
+  estava na lista, "tudo bem" aparecia nos exemplos — e o validador barrou
+  uma saudação perfeita dizendo que era nome de outro cliente.
+
+  Lista de exceção é dívida: sempre falta uma palavra, e cada falta vira uma
+  mensagem barrada à toa. Posição gramatical não tem esse problema.
+*/
+const VOCATIVO = /(?:^|[\n.!?]\s*)([A-ZÀ-Ý][a-zà-ÿ]{2,})\s*,/g;
+
+function nomesEmVocativo(texto) {
   const achados = new Set();
-  // Nome próprio: maiúscula seguida de minúsculas, 3+ letras.
-  for (const m of (texto ?? "").matchAll(/\b([A-ZÀ-Ý][a-zà-ÿ]{2,})\b/g)) {
-    if (!PALAVRAS_QUE_COMECAM_FRASE.has(m[1])) achados.add(m[1]);
-  }
+  for (const m of (texto ?? "").matchAll(VOCATIVO)) achados.add(m[1]);
   return achados;
 }
 
 export function nomeDeOutroCliente(texto, { nomeCliente, exemplos, contexto, manual }) {
-  const noRascunho = primeirosNomes(texto);
+  const noRascunho = nomesEmVocativo(texto);
   if (noRascunho.size === 0) return null;
 
+  /*
+    Quem pode ser chamado assim: o próprio cliente, e qualquer nome que já
+    apareceu nesta conversa ou no manual — aí não é vazamento de exemplo, é
+    alguém que existe no caso.
+  */
   const permitido = new Set();
-  for (const n of primeirosNomes(`${contexto ?? ""} ${manual ?? ""}`)) permitido.add(n);
-  if (nomeCliente) for (const n of primeirosNomes(nomeCliente)) permitido.add(n);
+  for (const m of `${contexto ?? ""} ${manual ?? ""}`.matchAll(/\b([A-ZÀ-Ý][a-zà-ÿ]{2,})\b/g)) {
+    permitido.add(m[1]);
+  }
+  if (nomeCliente) {
+    for (const parte of String(nomeCliente).trim().split(/\s+/)) permitido.add(parte);
+  }
 
   const dosExemplos = new Set();
   for (const e of exemplos ?? []) {
-    for (const n of primeirosNomes(e?.resposta_ryan ?? "")) dosExemplos.add(n);
-    for (const n of primeirosNomes(e?.mensagem_cliente ?? "")) dosExemplos.add(n);
+    for (const n of nomesEmVocativo(e?.resposta_ryan ?? "")) dosExemplos.add(n);
   }
 
   for (const nome of noRascunho) {

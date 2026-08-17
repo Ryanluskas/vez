@@ -8,7 +8,11 @@
     "start": "node src/index.js",
     "diagnostico": "node src/diagnostico.js",
     "simular": "node src/simulacao/rodar.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "e2e": "node src/e2e/conversa.js",
+    "e2e:banco": "node src/e2e/estado-do-banco.js",
+    "e2e:queda": "node src/e2e/queda.js",
+    "e2e:extracao": "node src/e2e/extracao.js"
   },
   "engines": {
     "node": ">=20.9"

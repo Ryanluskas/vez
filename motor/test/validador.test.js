@@ -260,6 +260,35 @@ test("nomeDeOutroCliente ignora começo de frase", () => {
   assert.equal(r, null, "palavra comum virou nome de gente");
 });
 
+test('"Tudo bem?" não é nome de cliente', () => {
+  /*
+    Achado no teste de ponta a ponta: o modelo escreveu "Tudo bem?", a versão
+    antiga tratou "Tudo" como nome próprio porque "tudo bem" aparecia nos
+    exemplos, e barrou uma saudação perfeita. A mensagem foi parar na Fila.
+  */
+  const r = nomeDeOutroCliente("Oi! Tudo bem? Como posso te ajudar hoje?", {
+    nomeCliente: null,
+    exemplos: [
+      { resposta_ryan: "Marlene, tudo bem? Consegui liberar VALOR pra você." },
+      { resposta_ryan: "Oi Josenete! Tudo certo por aí?" },
+    ],
+    contexto: "",
+    manual: "",
+  });
+
+  assert.equal(r, null, "saudação comum barrada como nome de outro cliente");
+});
+
+test("palavra capitalizada no meio da frase não é vocativo", () => {
+  const r = nomeDeOutroCliente("Já mandei pro Santander e o Banco confirmou o recebimento.", {
+    nomeCliente: "Antonio",
+    exemplos: [{ resposta_ryan: "Banco, tudo certo" }],
+    contexto: "",
+    manual: "",
+  });
+  assert.equal(r, null);
+});
+
 test("contradizOManual não inventa contradição", () => {
   assert.equal(contradizOManual("Atendemos INSS e servidor estadual.", MANUAL), null);
   assert.equal(contradizOManual("qualquer texto", ""), null);

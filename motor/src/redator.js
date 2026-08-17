@@ -111,6 +111,25 @@ export async function escreverPedido({
   manual = "",
   memoria = "",
 }) {
+  /*
+    "Me manda o extrato de margem" contém a palavra "margem", que é gatilho
+    de dinheiro. Qualquer texto que o modelo escrevesse em cima disso seria
+    descartado pelo guarda logo abaixo — e o que sairia é o pedido cru, que
+    já está aqui.
+
+    Medido no teste de ponta a ponta: 90 segundos de geração indo direto
+    pro lixo, toda vez que o bot precisa pedir a margem.
+
+    Afrouxar o guarda pra deixar esse caso passar foi tentado e descartado:
+    o mesmo afrouxamento deixaria passar "sua margem hoje é de R$ 800".
+    Não dá pra distinguir pelo motivo do gatilho. Então a saída é não gastar
+    a chamada — a mensagem que o cliente recebe é exatamente a mesma.
+  */
+  if (checarGatilhos(pedido).travou) {
+    log.info("O pedido já fala de margem/saldo; mando o texto do requisito direto.");
+    return null;
+  }
+
   const texto = await escrever({
     sistema:
       `Você é o próprio consultor de crédito consignado no WhatsApp. Escreva na primeira pessoa.\n` +
