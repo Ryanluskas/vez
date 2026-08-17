@@ -23,7 +23,24 @@ export type ItemDaFilaProps = {
   contexto: string | null;
   /* Por que essa conversa congelou, em portugues. */
   motivo: string | null;
+  /* Que informacao o bot esta pedindo: valor, prazo, documentos… */
+  categoria: string | null;
   atalhos: Atalho[];
+};
+
+/*
+  O que o bot precisa de voce, em uma palavra. E a diferenca entre abrir a
+  Fila e ver dez perguntas iguais, ou ver que tres sao de valor e uma e de
+  prazo — e responder as tres de valor de uma vez.
+*/
+const ROTULO_DA_CATEGORIA: Record<string, string> = {
+  valor: "valor",
+  prazo: "prazo",
+  documentos: "documentos",
+  status: "status",
+  saudacao: "conversa",
+  horario: "horario",
+  outro: "outro",
 };
 
 export function ItemDaFila({
@@ -35,6 +52,7 @@ export function ItemDaFila({
   pergunta,
   contexto,
   motivo,
+  categoria,
   atalhos,
 }: ItemDaFilaProps) {
   const inicio = new Date(criadoEm).getTime();
@@ -73,6 +91,14 @@ export function ItemDaFila({
         </time>
         <span className="text-[14px] text-texto">{nome}</span>
         <span className="num text-[12px] text-texto3">{telefone}</span>
+
+        {/* O que ele precisa de voce. Le-se antes da pergunta: o consultor
+            decide em qual item mexer olhando isto. */}
+        {categoria ? (
+          <span className="rounded-sm bg-fundo px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-texto2">
+            {ROTULO_DA_CATEGORIA[categoria] ?? categoria}
+          </span>
+        ) : null}
       </div>
 
       <p className="mt-1.5 text-[14px] leading-relaxed text-texto">{pergunta}</p>

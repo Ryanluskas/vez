@@ -4,6 +4,7 @@ import wweb from "whatsapp-web.js";
 import QRCode from "qrcode";
 import { RAIZ } from "./ambiente.js";
 import { avisoDeDocumento } from "./funil.js";
+import { criarMemoriaDeEventos } from "./travas.js";
 import { log } from "./log.js";
 
 const { Client, LocalAuth } = wweb;
@@ -131,6 +132,10 @@ function limparSessaoSePreciso(idConexao, apelido) {
 */
 export function criarWhatsApp({ conexao, estado, fluxo }) {
   const apelido = conexao.apelido ?? "Principal";
+
+  /* Ids de evento que este numero ja tratou. Janela curta: reentrega
+     acontece em segundos, nao em dias. */
+  const jaVi = criarMemoriaDeEventos();
   limparSessaoSePreciso(conexao.id, apelido);
 
   const cliente = new Client({
@@ -249,6 +254,19 @@ export function criarWhatsApp({ conexao, estado, fluxo }) {
     try {
       const idDoChat = msg.fromMe ? msg.to : msg.from;
       if (!ehConversaDeCliente(idDoChat) || msg.isStatus) return;
+
+      /*
+        O WhatsApp reentrega evento: reconexão, aba recarregada, sincronia
+        do celular. O índice único em mensagens.id_whatsapp já pega isso,
+        mas só depois de uma ida ao Supabase — e nesse meio tempo duas
+        cópias do mesmo evento já estão correndo em paralelo.
+
+        Aqui é de graça e acontece antes de tudo.
+      */
+      if (!jaVi.novo(msg.id?._serialized)) {
+        log.info(`[${apelido}] evento repetido do WhatsApp; ignorei.`);
+        return;
+      }
 
       const texto = textoDaMensagem(msg);
       if (!texto) return;

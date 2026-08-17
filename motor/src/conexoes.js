@@ -27,7 +27,7 @@ import { log } from "./log.js";
 const RECONFERIR_MS = 30_000;
 const CONFORTAVEL = 3;
 
-export function criarMaestro({ supabase, fluxo, userId }) {
+export function criarMaestro({ supabase, fluxo, userId, aoMudarEstado = () => {} }) {
   // idConexao -> { cliente, estado, apelido }
   const ligados = new Map();
   let relogio = null;
@@ -95,6 +95,10 @@ export function criarMaestro({ supabase, fluxo, userId }) {
       `[${apelido}] abrindo o WhatsApp…${tentativa > 1 ? ` (tentativa ${tentativa})` : ""}`
     );
 
+    // O painel precisa ver "reconectando", não uma fila que parou de andar
+    // sem explicação. É a diferença entre esperar e achar que quebrou.
+    if (tentativa > 1) aoMudarEstado("reconectando", `${apelido}: tentativa ${tentativa}`);
+
     const estado = criarEstado(supabase, conexao.id, apelido);
     await estado.anotar({ estado: "iniciando", detalhe: "Abrindo o WhatsApp." });
     estado.baterCoracao();
@@ -104,7 +108,10 @@ export function criarMaestro({ supabase, fluxo, userId }) {
 
     // initialize() demora e pode falhar; nao pode travar os outros numeros.
     cliente.initialize().then(
-      () => abrindo.delete(conexao.id),
+      () => {
+        abrindo.delete(conexao.id);
+        aoMudarEstado("ligado", null);
+      },
       async (erro) => {
       log.erro(`[${apelido}] não abriu: ${erro.message}`);
       ligados.delete(conexao.id);
@@ -126,6 +133,7 @@ export function criarMaestro({ supabase, fluxo, userId }) {
         await estado.desligar(
           `Não consegui abrir o WhatsApp depois de ${TENTATIVAS} tentativas: ${erro.message}`
         );
+        aoMudarEstado("erro", `${apelido} não abriu: ${erro.message}`.slice(0, 200));
         log.alerta(`[${apelido}] vou tentar de novo em 5 minutos.`);
         return;
       }

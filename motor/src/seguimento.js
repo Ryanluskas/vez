@@ -1,4 +1,5 @@
 import { decidirFollowup, MAXIMO_DE_FOLLOWUPS, horarioDecente } from "./funil.js";
+import { EVENTOS, observadorMudo } from "./observar.js";
 import { log } from "./log.js";
 
 /*
@@ -16,7 +17,7 @@ import { log } from "./log.js";
 
 const VARREDURA_MS = 10 * 60 * 1000; // 10 minutos
 
-export function criarSeguimento({ supabase, maestro, userId }) {
+export function criarSeguimento({ supabase, maestro, userId, observador = observadorMudo() }) {
   async function varrer() {
     // Fora do horário nem consulta o banco.
     if (!horarioDecente()) return;
@@ -71,10 +72,20 @@ export function criarSeguimento({ supabase, maestro, userId }) {
           texto: decisao.texto,
         });
 
+        observador.registrar(EVENTOS.SEGUIMENTO, {
+          idConversa: conversa.id,
+          detalhe: `cobranca ${decisao.tentativa} de ${MAXIMO_DE_FOLLOWUPS}`,
+        });
+
         log.info(
           `↻ follow-up ${decisao.tentativa}/${MAXIMO_DE_FOLLOWUPS} → ${conversa.nome ?? conversa.telefone}`
         );
       } catch (erro) {
+        observador.registrar(EVENTOS.ERRO, {
+          idConversa: conversa.id,
+          ok: false,
+          detalhe: `follow-up falhou: ${erro.message}`,
+        });
         log.erro(`follow-up para ${conversa.telefone}: ${erro.message}`);
       }
     }

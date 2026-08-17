@@ -5,6 +5,10 @@ import { criarMaestro } from "./conexoes.js";
 import { criarEscuta } from "./escuta.js";
 import { criarSeguimento } from "./seguimento.js";
 import { pegarTrava, soltarTrava } from "./instancia.js";
+import { criarObservador, EVENTOS } from "./observar.js";
+import { criarBatimento } from "./batimento.js";
+import { ondeCadaCoisaRoda } from "./ia.js";
+import { groqVivo, groqConfigurado } from "./groq.js";
 import {
   ollamaVivo,
   modeloDisponivel,
@@ -38,6 +42,21 @@ async function conferirIa() {
     return false;
   }
 
+  /*
+    Confere o Groq AQUI, e não na primeira mensagem de cliente. Chave
+    errada ou cota estourada é coisa que o consultor precisa saber no boot,
+    com a máquina na frente dele — não vinte minutos depois, quando um
+    cliente já está esperando e a única pista é uma linha no log.
+  */
+  if (groqConfigurado && !(await groqVivo())) {
+    log.alerta(
+      `A chave do Groq não foi aceita. Vou escrever com o modelo local (${modeloEmUso}), ` +
+        `que escreve pior. Confira GROQ_API_KEY no .env.`
+    );
+  }
+
+  const onde = ondeCadaCoisaRoda();
+  log.info(`Pensa com ${onde.pensa} · escreve com ${onde.escreve}`);
   log.info(`IA pronta: ${modeloEmUso}. Carregando na memória…`);
 
   // Enquanto o WhatsApp ainda nem abriu, ninguem esta esperando resposta.
@@ -66,16 +85,30 @@ async function principal() {
 
   await conferirIa();
 
-  const fluxo = criarFluxo(supabase, usuario.id);
-  const maestro = criarMaestro({ supabase, fluxo, userId: usuario.id });
+  /*
+    O diário e o batimento sobem antes de tudo que atende: se o WhatsApp
+    falhar ao abrir, isso precisa aparecer no painel, e não só no terminal
+    da máquina do consultor.
+  */
+  const observador = criarObservador({ supabase, userId: usuario.id });
+  const batimento = criarBatimento({ supabase, userId: usuario.id });
+  const pararBatimento = batimento.ligar();
+
+  const fluxo = criarFluxo(supabase, usuario.id, { observador });
+  const maestro = criarMaestro({
+    supabase,
+    fluxo,
+    userId: usuario.id,
+    aoMudarEstado: (estado, detalhe) => batimento.marcar(estado, detalhe),
+  });
 
   /*
     A escuta do painel e o follow-up sobem junto com o motor, nao junto com
     um numero especifico: eles atendem todos. Quem decide por qual numero
     cada mensagem sai e o maestro, olhando a conversa.
   */
-  const escuta = criarEscuta({ supabase, fluxo, maestro, userId: usuario.id });
-  const seguimento = criarSeguimento({ supabase, maestro, userId: usuario.id });
+  const escuta = criarEscuta({ supabase, fluxo, maestro, userId: usuario.id, observador });
+  const seguimento = criarSeguimento({ supabase, maestro, userId: usuario.id, observador });
 
   const desligarEscuta = escuta.ligar();
   const desligarSeguimento = seguimento.ligar();
@@ -92,12 +125,33 @@ async function principal() {
     desligarEscuta?.();
     desligarSeguimento?.();
     await maestro.desligarTudo();
+    // O diário sai por último: ele tem que registrar o que aconteceu até agora.
+    await observador.terminar();
+    await pararBatimento();
     soltarTrava();
     process.exit(0);
   };
 
   process.on("SIGINT", () => encerrar("Ctrl+C"));
   process.on("SIGTERM", () => encerrar("SIGTERM"));
+
+  /*
+    Erro que ninguém pegou. Sem estes dois, uma promessa rejeitada em
+    qualquer canto derruba o Node em silêncio e o consultor descobre horas
+    depois que o bot parou — o pior modo de falha que este produto tem.
+  */
+  process.on("unhandledRejection", (erro) => {
+    log.erro(`Erro solto: ${erro?.message ?? erro}`);
+    observador.registrar(EVENTOS.ERRO, { ok: false, detalhe: `erro solto: ${erro?.message}` });
+    batimento.marcar("erro", String(erro?.message ?? erro).slice(0, 200));
+  });
+
+  process.on("uncaughtException", (erro) => {
+    log.erro(`Erro grave: ${erro.message}`);
+    batimento.marcar("erro", erro.message.slice(0, 200));
+    // Aqui o processo está mesmo comprometido; sair é mais honesto que fingir.
+    encerrar("erro grave");
+  });
 
   log.info("Abrindo seus números… na primeira vez isso demora um pouco.");
   await maestro.ligar();

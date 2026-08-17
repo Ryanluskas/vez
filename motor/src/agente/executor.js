@@ -1,4 +1,6 @@
 import { FERRAMENTAS, validarArgumentos } from "./ferramentas.js";
+import { tentar, ehPassageiro } from "../resiliencia.js";
+import { EVENTOS, observadorMudo } from "../observar.js";
 import { log } from "../log.js";
 
 /*
@@ -62,17 +64,12 @@ export function comTempoLimite(promessa, ms, nome) {
 }
 
 export function criarExecutor(contexto) {
-  const { supabase = null, userId = null } = contexto ?? {};
+  const { observador = observadorMudo() } = contexto ?? {};
 
   /* Grava o que rodou. Falha aqui não pode derrubar a ferramenta que deu
-     certo — log é para depois, atendimento é para agora. */
-  async function registrar(linha) {
-    if (!supabase || !userId) return;
-    try {
-      await supabase.from("acoes_do_agente").insert({ user_id: userId, ...linha });
-    } catch {
-      /* tabela ainda não criada (17_ferramentas.sql): segue sem registro */
-    }
+     certo — o diário é para depois, o atendimento é para agora. */
+  function registrar(linha) {
+    observador.registrar(EVENTOS.FERRAMENTA, linha);
   }
 
   /*
@@ -95,15 +92,16 @@ export function criarExecutor(contexto) {
 
       const conferido = validarArgumentos(definicao, argumentos);
       if (!conferido.ok) {
-        log.alerta(`${nome} recusada: ${conferido.problemas.join("; ")}`);
-        await registrar({
-          id_conversa: idConversa,
+        const porque = conferido.problemas.join("; ");
+        log.alerta(`${nome} recusada: ${porque}`);
+        registrar({
+          idConversa,
           ferramenta: nome,
           argumentos,
           ok: false,
-          erro: conferido.problemas.join("; "),
+          detalhe: `recusada: ${porque}`,
         });
-        return { ok: false, erro: conferido.problemas.join("; "), recusada: true };
+        return { ok: false, erro: porque, recusada: true };
       }
 
       const chave = assinatura(nome, conferido.argumentos);
@@ -127,25 +125,30 @@ export function criarExecutor(contexto) {
       }
 
       const comecou = Date.now();
-      let resultado;
 
-      try {
-        const dados = await comTempoLimite(
-          definicao.executar(conferido.argumentos, contexto),
-          TEMPO_LIMITE_MS,
-          nome
-        );
-        resultado = { ok: true, dados };
-      } catch (erro) {
-        /*
-          Erro de ferramenta é informação, não catástrofe. Quem chamou
-          decide o que fazer — na prática, mandar pra fila.
-        */
-        log.erro(`${nome}: ${erro.message}`);
-        resultado = { ok: false, erro: erro.message };
-      }
+      /*
+        Leitura pode ser retentada à vontade: ler duas vezes dá o mesmo
+        resultado. ESCRITA NÃO — a ferramenta pode ter chegado a gravar
+        antes de o erro aparecer, e a segunda tentativa gravaria de novo.
+        Uma pendência duplicada é pior que um erro reportado.
+      */
+      const podeRepetir = definicao.escrita !== true;
 
+      const r = await tentar(
+        () => comTempoLimite(definicao.executar(conferido.argumentos, contexto), TEMPO_LIMITE_MS, nome),
+        {
+          nome,
+          tentativas: podeRepetir ? 2 : 1,
+          passageiro: podeRepetir ? ehPassageiro : () => false,
+          silencioso: true,
+        }
+      );
+
+      const resultado = r.ok ? { ok: true, dados: r.valor } : { ok: false, erro: r.erro };
       const ms = Date.now() - comecou;
+
+      if (!resultado.ok) log.erro(`${nome}: ${resultado.erro}`);
+
       feitas.set(chave, resultado);
       registro.push({ nome, argumentos: conferido.argumentos, ok: resultado.ok, ms });
 
@@ -154,12 +157,12 @@ export function criarExecutor(contexto) {
           (resultado.ok ? "" : ` — ${resultado.erro}`)
       );
 
-      await registrar({
-        id_conversa: idConversa,
+      registrar({
+        idConversa,
         ferramenta: nome,
         argumentos: conferido.argumentos,
         ok: resultado.ok,
-        erro: resultado.ok ? null : resultado.erro,
+        detalhe: resultado.ok ? nome : resultado.erro,
         ms,
       });
 

@@ -3,9 +3,11 @@ import { escreverResposta, escreverComResposta, escreverPedido } from "./redator
 import { criarMemoria } from "./memoria.js";
 import { REQUISITOS } from "./requisitos.js";
 import { decidir, podeAgirSozinho, ACOES } from "./agente/decidir.js";
-import { validarDecisao } from "./agente/validar.js";
+import { validarDecisao, validarAntesDeEnviar } from "./agente/validar.js";
 import { criarExecutor } from "./agente/executor.js";
 import { planejarConsultas, consultasEmTexto } from "./agente/planejar.js";
+import { EVENTOS, observadorMudo } from "./observar.js";
+import { criarTravas } from "./travas.js";
 import { exemplosComBase } from "./estilo.js";
 import { log } from "./log.js";
 
@@ -16,8 +18,16 @@ const TAMANHO_DO_CONTEXTO = 4;
    pequeno perde o fio e comeca a copiar o exemplo em vez de imitar o tom. */
 const EXEMPLOS_NO_PROMPT = 3;
 
-export function criarFluxo(supabase, userId) {
+export function criarFluxo(supabase, userId, { observador = observadorMudo() } = {}) {
   const memoria = criarMemoria(supabase, userId);
+
+  /*
+    Uma fila por conversa. Cliente ansioso manda três mensagens em três
+    segundos: sem isto o motor classifica as três em paralelo e ele recebe
+    três respostas. Com isto, uma de cada vez — e as outras conversas
+    seguem em paralelo, sem esperar esta.
+  */
+  const travas = criarTravas();
 
   /* O bot mandou a lista de documentos: a bola passa pro cliente. */
   async function marcarEsperandoDocumentos(idConversa) {
@@ -394,10 +404,13 @@ export function criarFluxo(supabase, userId) {
     memoria,
     abrirPendencia,
     contextoDaConversa,
+    observador,
   });
 
   return {
     executor,
+    travas,
+    observador,
 
     /* Grava a mensagem crua. Vale pros dois lados da conversa. */
     async registrar({ idConexao, idChat, idMensagem, telefone, nome, texto, direcao }) {
@@ -469,8 +482,18 @@ export function criarFluxo(supabase, userId) {
 
       if (!r.ok) {
         log.erro(`Não consegui registrar o documento: ${r.erro}`);
+        observador.registrar(EVENTOS.ERRO, {
+          idConversa: conversa.id,
+          ok: false,
+          detalhe: `documento não registrado: ${r.erro}`,
+        });
         return;
       }
+
+      observador.registrar(EVENTOS.FUNIL, {
+        idConversa: conversa.id,
+        detalhe: "documentos recebidos",
+      });
 
       conversa.etapa = "documentos_recebidos";
     },
@@ -500,6 +523,17 @@ export function criarFluxo(supabase, userId) {
       ====================================================================
     */
     async processarRecebida(conversa, texto, nomeCliente) {
+      /*
+        Tudo daqui pra baixo roda com a conversa travada. É o que impede
+        duas mensagens do mesmo cliente de virarem duas respostas — e é
+        por conversa, então o cliente A travado não segura o cliente B.
+      */
+      return travas.naVezDe(conversa.id, () =>
+        this.decidirEExecutar(conversa, texto, nomeCliente)
+      );
+    },
+
+    async decidirEExecutar(conversa, texto, nomeCliente) {
       /* ---- 1. retrato ---- */
 
       // Silenciada: nem gasta consulta. O resto do retrato não importa.
@@ -507,6 +541,11 @@ export function criarFluxo(supabase, userId) {
         log.info(`${nomeCliente ?? "contato"} está silenciado. Só gravei.`);
         return;
       }
+
+      observador.registrar(EVENTOS.RECEBIDA, {
+        idConversa: conversa.id,
+        detalhe: `${texto.length} caracteres`,
+      });
 
       const [temPendencia, ultimasMensagens] = await Promise.all([
         jaTemPendenciaAberta(conversa.id),
@@ -559,12 +598,31 @@ export function criarFluxo(supabase, userId) {
             Object.entries(novosFatos).filter(([, v]) => v)
           ),
         });
-        if (gravou.ok) lembrado = await memoria.ler(conversa.id);
+
+        if (gravou.ok) {
+          lembrado = await memoria.ler(conversa.id);
+          if (gravou.dados?.gravou) {
+            observador.registrar(EVENTOS.MEMORIA, {
+              idConversa: conversa.id,
+              detalhe: `aprendi ${gravou.dados.campos.join(", ")}`,
+            });
+          }
+        }
       }
 
       const classificacao = travada
         ? null
         : await classificar({ texto, contexto });
+
+      if (classificacao) {
+        observador.registrar(EVENTOS.CLASSIFICOU, {
+          idConversa: conversa.id,
+          detalhe:
+            `${classificacao.categoria}` +
+            (classificacao.precisaDoRyan ? " · precisa de você" : "") +
+            (classificacao.decidiuNaRegra ? " (regra rígida)" : ""),
+        });
+      }
 
       /* ---- 2. decidir ---- */
 
@@ -601,6 +659,11 @@ export function criarFluxo(supabase, userId) {
       }
 
       await memoria.registrarAcao(conversa.id, decisao.acao, decisao.motivo);
+
+      observador.registrar(EVENTOS.DECIDIU, {
+        idConversa: conversa.id,
+        detalhe: `${decisao.acao} — ${decisao.motivo}`,
+      });
 
       /* ---- 3. executar ---- */
 
@@ -657,6 +720,13 @@ export function criarFluxo(supabase, userId) {
             .eq("id", conversa.id);
         }
 
+        observador.registrar(EVENTOS.HANDOFF, {
+          idConversa: conversa.id,
+          // O detalhe vira a métrica "motivos de handoff": mantê-lo curto e
+          // repetível é o que faz o agrupamento significar alguma coisa.
+          detalhe: decisao.escalonamento ?? decisao.categoria ?? "outro",
+        });
+
         if (decisao.assumirManual) {
           log.alerta(
             `${nomeCliente ?? "Cliente"} já voltou pra você ${conversa.escalonamentos}x. ` +
@@ -687,12 +757,15 @@ export function criarFluxo(supabase, userId) {
       );
 
       const exemplos = await exemplosDaCategoria(categoria);
+      const manual = await manualDaOperacao();
+
+      const comecouAEscrever = Date.now();
       const rascunho = await escreverResposta({
         mensagemCliente: texto,
         nomeCliente: lembrado?.nome ?? nomeCliente,
         contexto,
         exemplos,
-        manual: await manualDaOperacao(),
+        manual,
         memoria: memoria.emTexto(lembrado),
         consultas: consultasEmTexto(consultas),
       });
@@ -700,14 +773,78 @@ export function criarFluxo(supabase, userId) {
       // O bot achou que sabia, mas na hora de escrever nao soube sem chutar.
       // Isso nao e falha: e o produto funcionando. Vai pra fila.
       if (!rascunho) {
-        await abrirPendencia({
+        observador.registrar(EVENTOS.ESCREVEU, {
           idConversa: conversa.id,
+          ok: false,
+          detalhe: "não soube responder sem chutar",
+          ms: Date.now() - comecouAEscrever,
+        });
+        await ciclo.usar("solicitar_intervencao", {
+          id_conversa: conversa.id,
           pergunta: texto,
-          contexto,
-          categoria,
           motivo: "o bot não soube responder sem chutar",
+          categoria,
         });
         log.info(`→ fila  ${nomeCliente ?? ""} · o bot não soube escrever`);
+        return;
+      }
+
+      observador.registrar(EVENTOS.ESCREVEU, {
+        idConversa: conversa.id,
+        detalhe: `${categoria} · ${rascunho.length} caracteres`,
+        ms: Date.now() - comecouAEscrever,
+      });
+
+      /*
+        ================================================================
+        A ÚLTIMA PORTA
+
+        Nenhuma mensagem chega ao cliente sem passar por aqui. O redator
+        já tem as próprias barreiras, e mesmo assim isto existe: o
+        redator confere o texto que ele mesmo pediu, com o contexto que
+        ele mesmo montou. O validador confere com o caso inteiro na mão —
+        a memória, os exemplos, o manual, o que o cliente escreveu.
+
+        Reprovar não é "manda mesmo assim". É não mandar, gravar por quê,
+        e chamar gente quando o motivo for do tipo que só gente resolve.
+        ================================================================
+      */
+      const porta = validarAntesDeEnviar(rascunho, {
+        fontesPermitidas: [manual, texto, consultasEmTexto(consultas)],
+        exemplos,
+        manual,
+        memoria: lembrado,
+        nomeCliente: lembrado?.nome ?? nomeCliente,
+        contextoDaConversa: contexto,
+        mensagemCliente: texto,
+      });
+
+      observador.registrar(EVENTOS.VALIDOU, {
+        idConversa: conversa.id,
+        ok: porta.ok,
+        detalhe: porta.ok ? "aprovada" : `${porta.codigo}: ${porta.motivo}`,
+      });
+
+      if (!porta.ok) {
+        log.alerta(`Barrei a resposta para ${nomeCliente ?? "o cliente"}: ${porta.motivo}`);
+
+        /*
+          Malformado e repergunta o bot causou sozinho e nenhum humano
+          precisa resolver — a próxima mensagem do cliente tenta de novo.
+          Valor inventado, dado de outro cliente, contradição do manual e
+          injeção são de outra natureza: alguém tem que olhar.
+        */
+        if (porta.paraOConsultor) {
+          await ciclo.usar("solicitar_intervencao", {
+            id_conversa: conversa.id,
+            pergunta: texto,
+            motivo: `resposta barrada — ${porta.motivo}`,
+            categoria,
+          });
+          log.destaque(`→ FILA  ${nomeCliente ?? ""} · ${porta.codigo}`);
+        } else {
+          await mudarEstagio(conversa.id, "aguardando_bot");
+        }
         return;
       }
 
@@ -715,6 +852,7 @@ export function criarFluxo(supabase, userId) {
         idConversa: conversa.id,
         texto: rascunho,
         categoria,
+        confianca: decisao.confianca,
       });
 
       log.info(
@@ -737,21 +875,59 @@ export function criarFluxo(supabase, userId) {
         .single();
 
       const exemplos = await exemplosDaCategoria(pendencia.categoria ?? "outro");
+      const manual = await manualDaOperacao();
+      const lembrado = await memoria.ler(pendencia.id_conversa);
 
       const texto = await escreverComResposta({
         mensagemCliente: pendencia.pergunta,
         respostaDoConsultor: pendencia.resposta,
         nomeCliente: conversa?.nome,
         exemplos,
-        manual: await manualDaOperacao(),
+        manual,
+        memoria: memoria.emTexto(lembrado),
       });
+
+      /*
+        A mesma porta, com uma diferença: aqui número PODE sair, porque o
+        dado é seu. O que se confere é se a IA acrescentou algum outro
+        enquanto embrulhava a sua resposta.
+
+        Reprovou? Sai a sua resposta como você escreveu. Ela é curta e
+        crua, mas é sua e está certa — e o cliente prefere um "4200 em 12x
+        de 380" seco a um texto bonito com o número errado.
+      */
+      const porta = validarAntesDeEnviar(texto, {
+        permitirNumeros: true,
+        fontesPermitidas: [pendencia.resposta, pendencia.pergunta, manual],
+        exemplos,
+        manual,
+        memoria: lembrado,
+        nomeCliente: conversa?.nome,
+        mensagemCliente: pendencia.pergunta,
+      });
+
+      observador.registrar(EVENTOS.VALIDOU, {
+        idConversa: pendencia.id_conversa,
+        ok: porta.ok,
+        detalhe: porta.ok ? "aprovada (resposta sua)" : `${porta.codigo}: ${porta.motivo}`,
+      });
+
+      const vaiSair = porta.ok ? texto : pendencia.resposta;
+      if (!porta.ok) {
+        log.alerta(`Barrei o texto da IA (${porta.motivo}). Mandando a sua resposta como está.`);
+      }
 
       await abrirRascunho({
         idConversa: pendencia.id_conversa,
-        texto,
+        texto: vaiSair,
         categoria: pendencia.categoria ?? "outro",
         idPendencia: pendencia.id,
         origem: "consultor",
+      });
+
+      observador.registrar(EVENTOS.CONSULTOR, {
+        idConversa: pendencia.id_conversa,
+        detalhe: "você respondeu; o agente segue sozinho daqui",
       });
 
       /*

@@ -109,3 +109,143 @@ export async function algumMotorLigado(): Promise<boolean> {
   const { conexoes } = await conexoesDoUsuario();
   return conexoes.some((c) => c.ligado);
 }
+
+/* ------------------------------------------------------------------
+   Estado do motor
+
+   O motor roda na máquina do consultor e o painel na Vercel: um não
+   enxerga o outro. O motor grava um batimento a cada 30s, e "offline" é
+   a AUSÊNCIA de batimento recente — motor que caiu não consegue avisar
+   que caiu.
+------------------------------------------------------------------ */
+
+/* Três batimentos de folga: um perdido não pode virar alarme falso. */
+const VALIDADE_DO_BATIMENTO_MS = 100_000;
+
+export type SaudeDoMotor = {
+  estado: "ligado" | "reconectando" | "erro" | "offline";
+  detalhe: string | null;
+  servicos: Record<string, string>;
+  desdeMs: number | null;
+  tabelaPronta: boolean;
+};
+
+export async function saudeDoMotor(): Promise<SaudeDoMotor> {
+  const supabase = await criarClienteServidor();
+
+  const { data, error } = await supabase
+    .from("motor_estado")
+    .select("estado, detalhe, servicos, batimento_em")
+    .maybeSingle();
+
+  // Migração 18 ainda não rodou: não dá pra afirmar nada sobre o motor.
+  if (error) {
+    return { estado: "offline", detalhe: null, servicos: {}, desdeMs: null, tabelaPronta: false };
+  }
+
+  if (!data) {
+    return { estado: "offline", detalhe: null, servicos: {}, desdeMs: null, tabelaPronta: true };
+  }
+
+  const desdeMs = Date.now() - new Date(data.batimento_em).getTime();
+  const calado = desdeMs > VALIDADE_DO_BATIMENTO_MS;
+
+  return {
+    estado: calado ? "offline" : (data.estado as SaudeDoMotor["estado"]),
+    detalhe: calado ? "sem sinal do motor" : data.detalhe,
+    servicos: (data.servicos ?? {}) as Record<string, string>,
+    desdeMs,
+    tabelaPronta: true,
+  };
+}
+
+/* ------------------------------------------------------------------
+   Atividade e métricas do agente
+------------------------------------------------------------------ */
+
+export type EventoDoAgente = {
+  id: string;
+  tipo: string;
+  detalhe: string | null;
+  ferramenta: string | null;
+  ok: boolean;
+  ms: number | null;
+  criado_em: string;
+  conversas: { nome: string | null; telefone: string } | null;
+};
+
+export async function atividadeDoAgente(limite = 60): Promise<{
+  eventos: EventoDoAgente[];
+  tabelaPronta: boolean;
+}> {
+  const supabase = await criarClienteServidor();
+
+  const { data, error } = await supabase
+    .from("acoes_do_agente")
+    .select("id, tipo, detalhe, ferramenta, ok, ms, criado_em, conversas(nome, telefone)")
+    .order("criado_em", { ascending: false })
+    .limit(limite)
+    .returns<EventoDoAgente[]>();
+
+  if (error) return { eventos: [], tabelaPronta: false };
+  return { eventos: data ?? [], tabelaPronta: true };
+}
+
+export type MetricasDoAgente = {
+  recebidas: number;
+  enviadas: number;
+  handoffs: number;
+  ferramentas: number;
+  validacoesReprovadas: number;
+  erros: number;
+  retentativas: number;
+  followups: number;
+  taxaAutomacao: number | null;
+  msMedioResposta: number | null;
+  msPiorResposta: number | null;
+};
+
+export async function metricasDeHoje(): Promise<MetricasDoAgente | null> {
+  const supabase = await criarClienteServidor();
+
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+
+  const { data, error } = await supabase
+    .from("metricas_do_agente")
+    .select("*")
+    .gte("dia", hoje.toISOString())
+    .maybeSingle();
+
+  if (error || !data) return null;
+
+  return {
+    recebidas: data.recebidas ?? 0,
+    enviadas: data.enviadas ?? 0,
+    handoffs: data.handoffs ?? 0,
+    ferramentas: data.ferramentas ?? 0,
+    validacoesReprovadas: data.validacoes_reprovadas ?? 0,
+    erros: data.erros ?? 0,
+    retentativas: data.retentativas ?? 0,
+    followups: data.followups ?? 0,
+    taxaAutomacao: data.taxa_automacao ?? null,
+    msMedioResposta: data.ms_medio_resposta ?? null,
+    msPiorResposta: data.ms_pior_resposta ?? null,
+  };
+}
+
+export type MotivoDeHandoff = { motivo: string; vezes: number };
+
+export async function motivosDeHandoff(): Promise<MotivoDeHandoff[]> {
+  const supabase = await criarClienteServidor();
+
+  const { data, error } = await supabase
+    .from("motivos_de_handoff")
+    .select("motivo, vezes")
+    .order("vezes", { ascending: false })
+    .limit(6)
+    .returns<MotivoDeHandoff[]>();
+
+  if (error) return [];
+  return data ?? [];
+}

@@ -1,3 +1,5 @@
+import { tentar } from "./resiliencia.js";
+import { EVENTOS, observadorMudo } from "./observar.js";
 import { log } from "./log.js";
 
 /*
@@ -13,7 +15,7 @@ import { log } from "./log.js";
 
 const VARREDURA_MS = 15_000;
 
-export function criarEscuta({ supabase, fluxo, maestro, userId }) {
+export function criarEscuta({ supabase, fluxo, maestro, userId, observador = observadorMudo() }) {
   // Ids em processamento agora. Sem isso, o realtime e a varredura podem
   // pegar a mesma linha ao mesmo tempo e a cliente recebe a mensagem duas vezes.
   const naMao = new Set();
@@ -105,9 +107,28 @@ export function criarEscuta({ supabase, fluxo, maestro, userId }) {
     */
     const destino = conversa.id_chat ?? `${conversa.telefone}@c.us`;
 
-    // Envia primeiro, marca depois. Se cair a luz no meio, o pior caso e
-    // mandar de novo — melhor que o cliente nunca receber e ninguem notar.
-    await whatsapp.sendMessage(destino, rascunho.texto_sugerido);
+    /*
+      Envia primeiro, marca depois. Se cair a luz no meio, o pior caso e
+      mandar de novo — melhor que o cliente nunca receber e ninguem notar.
+
+      A retentativa cobre o pisco: o Chrome do WhatsApp as vezes recusa o
+      primeiro envio logo depois de reconectar. Duas tentativas, e na
+      segunda falha o rascunho fica como esta e a varredura tenta de novo
+      em 15s — sem nunca marcar como enviado o que nao saiu.
+    */
+    const envio = await tentar(() => whatsapp.sendMessage(destino, rascunho.texto_sugerido), {
+      nome: `envio para ${conversa.nome ?? conversa.telefone}`,
+      tentativas: 2,
+    });
+
+    if (!envio.ok) {
+      observador.registrar(EVENTOS.ERRO, {
+        idConversa: conversa.id,
+        ok: false,
+        detalhe: `não consegui enviar: ${envio.erro}`,
+      });
+      throw new Error(`envio falhou: ${envio.erro}`);
+    }
 
     const agora = new Date().toISOString();
 
@@ -131,6 +152,13 @@ export function criarEscuta({ supabase, fluxo, maestro, userId }) {
         atualizado_em: agora,
       })
       .eq("id", conversa.id);
+
+    observador.registrar(EVENTOS.ENVIADA, {
+      idConversa: conversa.id,
+      detalhe: rascunho.automatico
+        ? `${rascunho.categoria} · sem passar por você`
+        : `${rascunho.categoria} · você aprovou`,
+    });
 
     log.destaque(`✓ Enviado para ${conversa.nome ?? conversa.telefone}`);
 

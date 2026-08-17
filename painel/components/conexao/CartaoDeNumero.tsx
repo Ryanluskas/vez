@@ -11,13 +11,6 @@ import {
 import type { Conexao } from "@/lib/dados";
 import { cn } from "@/lib/cn";
 
-const ROTULO = {
-  desligado: "Desligado",
-  iniciando: "Abrindo o WhatsApp",
-  aguardando_qr: "Esperando você escanear",
-  conectado: "Conectado e atendendo",
-} as const;
-
 const COR_DO_PONTO = {
   desligado: "bg-texto3",
   iniciando: "bg-morno",

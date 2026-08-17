@@ -1,159 +1,351 @@
 # Vez
 
-Atendente de WhatsApp com IA para consultores de crédito.
+Agente de WhatsApp com IA para consultores de crédito consignado.
 
-O bot responde as dúvidas simples imitando o jeito de falar do consultor. Quando a
-pergunta envolve **valor, quanto libera, parcela, simulação ou saldo**, ele não chuta:
-congela aquela conversa, coloca a pergunta numa **fila em ordem de chegada** e segue
-atendendo os outros clientes. O consultor responde no painel e a conversa volta a fluir.
+O bot atende sozinho: entende a mensagem, lembra do cliente, pergunta só o que falta,
+consulta o que precisa e responde no seu tom. Quando a pergunta envolve **valor,
+quanto libera, parcela, simulação, margem ou saldo**, ele não chuta — congela aquela
+conversa, coloca a pergunta numa **fila em ordem de chegada** e segue atendendo os
+outros. Você responde só o número; ele escreve, valida e manda.
 
-**Nada é enviado sozinho — com uma exceção.** Toda resposta a cliente passa pela sua
-aprovação em Rascunhos. A única mensagem que sai sem passar por você é o **follow-up**:
-o lembrete que o bot manda pra quem sumiu ("conseguiu separar os documentos?").
+## A regra de ouro
 
-Essa exceção é deliberada. Follow-up não tem número, o texto é fixo e escrito à mão —
-não passa pela IA — e um lembrete que espera aprovação vira mais uma tarefa na pilha,
-ou seja, não acontece. Dá pra desligar por conversa em Conversas.
+**A IA nunca é fonte de verdade para número.** Valor, parcela, juros, margem, saldo e
+simulação vêm de você ou do banco de dados — nunca do modelo. Ele decide *como*
+responder, jamais *qual* é o dado.
+
+Isso não é uma instrução no prompt. São cinco barreiras independentes, e cada uma
+assume que a anterior falhou:
+
+| # | Onde | O que faz |
+| --- | --- | --- |
+| 1 | `gatilhos.js` | Regex sobre a mensagem do cliente. Achou cheiro de dinheiro, vai pra Fila e a IA **nem é chamada** |
+| 2 | `ferramentas.js` | Argumento de ferramenta com número de dinheiro é recusado — o dado nem entra na memória |
+| 3 | `numeros.js` | Os exemplos de estilo entram mascarados: o modelo não tem dígito pra copiar |
+| 4 | `validar.js` | Todo número do rascunho tem que estar na sua resposta, na pergunta do cliente ou no manual |
+| 5 | `decidir.js` | A categoria `valor` nunca sai sozinha, em modo nenhum |
+
+Se não houver fonte real para o dado, o agente **pergunta ao cliente ou chama você**.
+Nunca preenche a lacuna.
 
 ## As duas peças
 
 | Peça | Onde roda | O que faz |
 | --- | --- | --- |
-| **Painel** (`painel/`) | Vercel, acessível de qualquer lugar | Login, fila, rascunhos, conversas, exemplos de estilo |
-| **Motor** (`motor/`) | No PC do consultor | WhatsApp Web + Ollama, sincroniza com a conta no Supabase |
+| **Painel** (`painel/`) | Vercel, acessível de qualquer lugar | Fila, rascunhos, conversas, atividade do agente, modo |
+| **Motor** (`motor/`) | No PC do consultor | WhatsApp Web + Ollama, sincroniza com o Supabase |
 
-O login amarra as duas: o consultor entra no painel e configura o mesmo usuário no
-motor. Cada conta só enxerga os próprios dados (Row-Level Security no Postgres).
-
-O motor roda local de propósito. O WhatsApp Web e o Ollama exigem uma máquina ligada,
-e é isso que mantém as mensagens dos clientes dentro do computador do consultor, sem
-API de IA paga.
+O login amarra as duas. Cada conta só enxerga os próprios dados (Row-Level Security no
+Postgres). O motor roda local de propósito: é isso que mantém as mensagens dos clientes
+dentro do computador do consultor.
 
 ## Estado atual
 
-- [x] **Fase 1** — painel, cadastro/login, RLS, identidade visual
-- [x] **Fase 2** — motor local, WhatsApp, QR na tela Conexão, mensagens no banco
-- [x] **Fase 3** — classificação com Ollama, regra rígida de valor, fila viva
-- [x] **Fase 4** — rascunhos, aprovar/editar e enviar
-- [x] **Fase 5** — aprender o jeito de falar (few-shot)
-- [ ] **Fase 6** — polimento
-- [ ] **Fase 7** — empacotar o motor num instalador Windows
+Concluído e funcionando:
 
-## Usar no dia a dia
+- [x] **Painel** — cadastro/login, RLS, identidade visual, fila, rascunhos, conversas
+- [x] **Motor** — WhatsApp Web multi-número, QR no painel, importação de histórico
+- [x] **Regra de ouro** — 5 barreiras, cobertas por teste
+- [x] **Memória por cliente** — nome, convênio, banco, objetivo, documentos entregues
+- [x] **Perguntas mínimas** — pede só o que falta, no máximo 2 por mensagem
+- [x] **Orquestrador** — decisão determinística, função pura, testável sem IA
+- [x] **Ferramentas** — 11 ações validadas, com limite, dedup, timeout e registro
+- [x] **Handoff com continuação** — você responde uma vez, o agente segue sozinho
+- [x] **Validator** — 10 checagens antes de qualquer mensagem sair
+- [x] **Recuperação** — retry com backoff e disjuntor por dependência
+- [x] **Observabilidade** — diário do agente, métricas e batimento do motor
+- [x] **Concorrência** — trava por conversa, dedup de evento, teste com vários clientes
+- [x] **Modo autônomo** — manual / assistido / autônomo
 
-Dê dois cliques no atalho **Vez** na Área de Trabalho. Ele compila o painel se
-precisar, sobe painel e motor, e abre o navegador. A janela preta que fica aberta é o
-motor: é nela que aparece o QR e o log de quem está sendo atendido. Fechar a janela
-para tudo.
+Não existe ainda:
+
+- [ ] **Integração com o sistema do banco** — a única coisa que impede o agente de
+      responder valor sozinho. A interface está pronta (`consultar_simulacao`), e
+      hoje ela responde honestamente que o dado não está disponível
+- [ ] **Instalador Windows** do motor
+
+## Como iniciar
+
+Dê dois cliques no atalho **Vez** na Área de Trabalho. Ele compila o painel se precisar,
+sobe painel e motor, e abre o navegador. A janela preta é o motor: é nela que aparece o
+QR e o log. Fechar a janela para tudo.
 
 Se o atalho sumir, recrie com `ferramentas\criar-atalho.bat`.
 
-Rodando pelo atalho o painel roda **compilado**, não em modo desenvolvimento — sobe em
-menos de um segundo em vez de vários. Depois de mexer no código do painel, apague
-`painel\.next` para ele recompilar no próximo uso.
-
-## Rodar o painel na mão
-
-**1. Criar o projeto no Supabase.** Em [supabase.com](https://supabase.com), plano
-gratuito. Em *Project Settings → API Keys*, copie a **Project URL** e a chave
-**publishable** (`sb_publishable_...`).
-
-**2. Colar as chaves.** Copie `painel/.env.local.example` para `painel/.env.local` e
-preencha. A chave `sb_secret_...` **nunca** entra aqui: ela ignora o RLS, e é o RLS
-que separa um consultor do outro.
-
-**3. Criar as tabelas.** No *SQL Editor* do Supabase, rode nesta ordem:
-
-Ou cole o `banco/tudo.sql`, que é os quatro juntos e pode ser rodado de novo sem
-quebrar nada. Separados, na ordem:
-
-- `banco/01_tabelas.sql`
-- `banco/02_rls.sql`
-- `banco/03_conexoes.sql`
-- `banco/04_fase3.sql`
-- `banco/05_atender.sql`
-- `banco/06_funil.sql`
-
-O `02` é o que isola os dados de cada consultor. A consulta no fim dele confere: as
-cinco tabelas têm que aparecer com `rls_ligado = true` e 4 políticas cada.
-
-**4. Subir o painel.**
+### Na mão
 
 ```bash
-npm install --prefix painel
+npm install --prefix painel && npm install --prefix motor
 ```
 
 ```bash
 npm run dev --prefix painel
 ```
 
-Abra `http://localhost:3000`, crie uma conta e você cai na Fila.
-
-> Se o Supabase estiver com confirmação de e-mail ligada (padrão), você recebe um link
-> antes de conseguir entrar. Para testar sem isso: *Authentication → Sign In / Up →
-> desmarque "Confirm email"*.
-
-## Rodar o motor
-
-O motor é o que conecta seu WhatsApp. Sem ele, o painel fica vazio.
-
-**1. Preencher o `motor/.env`** (copie de `motor/.env.example`): as mesmas duas chaves
-do Supabase, mais o e-mail e a senha da sua conta no painel. O login acontece uma vez;
-depois a sessão fica guardada em `motor/sessao/`.
-
-**2. Instalar e rodar:**
-
-```bash
-npm install --prefix motor
-```
-
 ```bash
 npm start --prefix motor
 ```
 
-Na primeira vez ele baixa o Chrome que o WhatsApp Web precisa (~200 MB) e demora um
-pouco. Quando o QR ficar pronto, abra **Conexão** no painel — ele aparece lá sozinho.
-No celular: WhatsApp → Aparelhos conectados → Conectar um aparelho.
-
-Depois de pareado, toda mensagem que chegar cai em **Conversas**. O motor precisa
-ficar aberto enquanto você quiser ser atendido; fechar a janela apaga a luz no painel.
-
-## Ligar a IA
-
-O motor roda sem IA — mas aí **tudo** vira pendência e você atende na mão. Para o bot
-começar a trabalhar:
-
-1. Instale o [Ollama](https://ollama.com/download)
-2. `ollama pull llama3.2:3b` (~2 GB, uma vez só)
-
-Depois disso é offline e sem mensalidade. O motor confere no boot e avisa se a IA não
-estiver de pé — ele nunca finge que está pensando.
-
-Dá para trocar o modelo por variável: `OLLAMA_MODELO=qwen2.5:3b npm start --prefix motor`.
-
-## Como o bot decide
-
-Chegou mensagem de cliente:
-
-1. **Regra rígida primeiro.** `motor/src/gatilhos.js` procura qualquer sinal de
-   dinheiro — valor, parcela, saldo, margem, juros, simulação, número em reais. Se
-   achar, vai direto para a Fila e a IA **nem é chamada**.
-2. **Depois a IA classifica.** Devolve categoria e se precisa de você. Só um `false`
-   explícito libera o bot; qualquer resposta estranha, timeout ou Ollama fora do ar
-   cai na Fila.
-3. **Se o bot pode responder**, ele escreve imitando seu jeito (few-shot com as
-   respostas que você já aprovou, da mesma categoria) e deixa em Rascunhos.
-4. **Se ele não souber escrever sem chutar**, vai para a Fila mesmo assim.
-5. **Última barreira:** antes de virar rascunho, o texto gerado passa de novo pelos
-   gatilhos. Se a IA alucinou um "R$ 5.000", o rascunho é jogado fora e a conversa vai
-   para a Fila.
-
-A regra rígida só sabe **forçar** "precisa do consultor". Não existe caminho no código
-em que a IA desligue essa trava. Há teste para isso:
+Antes de reclamar de qualquer coisa, rode o diagnóstico — ele confere .env, Ollama,
+login, tabelas, colunas e a regra de ouro, e diz exatamente o que fazer:
 
 ```bash
-npm test --prefix motor
+npm run diagnostico --prefix motor
 ```
+
+## Variáveis de ambiente
+
+**`painel/.env.local`** (copie de `.env.local.example`):
+
+| Variável | Obrigatória | O que é |
+| --- | --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` | sim | Project URL do Supabase |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | sim | Chave `sb_publishable_...` |
+
+**`motor/.env`** (copie de `.env.example`):
+
+| Variável | Obrigatória | O que é |
+| --- | --- | --- |
+| `SUPABASE_URL` | sim | A mesma do painel |
+| `SUPABASE_PUBLISHABLE_KEY` | sim | A mesma do painel |
+| `VEZ_EMAIL` / `VEZ_SENHA` | sim | Sua conta no painel |
+| `OLLAMA_MODELO` | não | Padrão `llama3.2:3b` |
+| `OLLAMA_URL` | não | Padrão `http://localhost:11434` |
+| `GROQ_API_KEY` | não | Liga o modelo grande para redigir |
+| `GROQ_MODELO` | não | Padrão `llama-3.3-70b-versatile` |
+| `VEZ_PLANEJADOR` | não | `0` desliga o planejador (uma chamada de IA a menos por resposta) |
+| `WA_VERSAO_HTML` | não | Prende o WhatsApp Web numa versão conhecida |
+
+A chave `sb_secret_...` **nunca** entra em lugar nenhum: ela ignora o RLS, e é o RLS que
+separa um consultor do outro. O motor recusa iniciar se encontrar uma.
+
+## Migrations
+
+No *SQL Editor* do Supabase, cole `banco/tudo.sql` — é todos juntos e pode ser rodado
+de novo sem quebrar nada. Separados, nesta ordem:
+
+| Arquivo | O que traz |
+| --- | --- |
+| `01_tabelas.sql` `02_rls.sql` | Tabelas e isolamento por conta |
+| `03_conexoes.sql` | Vários números de WhatsApp |
+| `04_fase3.sql` `05_atender.sql` | Rascunhos, categorias, silenciar contato |
+| `06_funil.sql` | Etapas de venda e follow-up |
+| `07`–`10` | Multi-número, importação, migração @lid |
+| `11_atalhos.sql` `12_conhecimento.sql` | Respostas curinga e manual da operação |
+| `13_autonomo.sql` `15_modos.sql` | Modo manual / assistido / autônomo |
+| `14_memoria.sql` | Memória por cliente |
+| `16_handoff.sql` | Origem do rascunho, contador de escalonamentos, trava de loop |
+| `17_ferramentas.sql` | Registro das ferramentas executadas |
+| `18_observabilidade.sql` | Diário do agente, batimento do motor, métricas |
+
+O `02` é o que isola os dados de cada consultor: a consulta no fim dele tem que mostrar
+`rls_ligado = true` e 4 políticas por tabela.
+
+## Os três modos
+
+Em **Conta → Modo do agente**:
+
+| Modo | O que sai sozinho |
+| --- | --- |
+| **Manual** | Nada. Tudo espera aprovação em Rascunhos |
+| **Assistido** | Só decisão de alta confiança (≥ 0.8) nas categorias que você liberou |
+| **Autônomo** | Tudo nas categorias liberadas |
+
+"Confiança" aqui **não** é o modelo se auto-avaliando — isso seria número decorativo. É
+quão determinística foi a decisão: `1.0` quando saiu de regra rígida, `0.8` do
+classificador, `0.5` quando ele não soube encaixar. O modo assistido corta em `0.8`,
+então deixa passar o que o código decidiu e segura o que dependeu de palpite.
+
+Em **modo nenhum** a categoria `valor` sai sozinha.
+
+O follow-up é a exceção histórica: sai sem aprovação em qualquer modo, porque um
+lembrete que espera aprovação vira mais uma tarefa na pilha — ou seja, não acontece. O
+que protege isso é o texto ser fixo, escrito à mão, sem número e sem IA no meio.
+
+## Quem pensa e quem escreve
+
+| Papel | Modelo | Por quê |
+| --- | --- | --- |
+| **Pensar** — classificar, extrair fato, escolher ferramenta | Ollama local | Vê a mensagem crua, inclusive quando fala de dinheiro. Não sai da máquina |
+| **Escrever** — a mensagem que o cliente lê | Groq, se houver chave; senão o local | Em modo autônomo isso sai sem ninguém ler antes; qualidade importa |
+
+Trocáveis por variável de ambiente, sem tocar na lógica. Sem `GROQ_API_KEY` tudo
+continua funcionando, só sai mais duro.
+
+**Decidir não é dos dois.** A decisão é código (`agente/decidir.js`), função pura,
+testada. O brief original pedia um agente devolvendo `{action, confidence}` em JSON —
+mas medindo o `llama3.2:3b` nessa tarefa, ele mistura `R$` com `%`, copia número de
+exemplo e responde "Não sei" pro cliente. Construir a parte mais crítica do produto
+sobre a parte menos confiável dele seria um erro caro.
+
+## As ferramentas
+
+O modelo **escolhe** qual usar; ele nunca escreve a chamada. O que sai dele é
+`{"nome": ..., "argumentos": {...}}`, e só vira execução depois de bater com uma
+definição do registro e passar na validação.
+
+| Ferramenta | Escreve? | Estado |
+| --- | --- | --- |
+| `consultar_cliente` | não | funcional |
+| `consultar_memoria` | não | funcional |
+| `consultar_pendencias` | não | funcional |
+| `buscar_conhecimento` | não | funcional |
+| `atualizar_memoria` | sim | funcional |
+| `marcar_informacao_coletada` | sim | funcional |
+| `atualizar_etapa` | sim | funcional (recusa `fechado`/`perdido` — o bot não vê o resultado da proposta) |
+| `registrar_documento_recebido` | sim | funcional |
+| `criar_followup` | sim | funcional (liga a cobrança; **quando** sai é do funil) |
+| `cancelar_followup` | sim | funcional |
+| `solicitar_intervencao` | sim | funcional |
+| `consultar_simulacao` | não | **sem integração** — responde `{disponivel: false}` e indica o próximo passo |
+
+O modelo só pode escolher as de **leitura**. Escrever é decidir, e decidir continua no
+orquestrador. O `id_conversa` é preenchido pelo código, nunca pelo modelo: uma
+alucinação de id leria os dados de outro cliente.
+
+Cinco proteções no executor: limite de 6 por ciclo, chamada repetida devolve o primeiro
+resultado sem re-executar, corte de 8 segundos, erro vira resposta em vez de exceção, e
+tudo fica registrado.
+
+## O validator
+
+Nenhuma mensagem chega ao cliente sem passar por `validarAntesDeEnviar`. Ele bloqueia:
+
+| Código | O que pega |
+| --- | --- |
+| `inventou_numero` | Valor, parcela ou juros que não veio de fonte real |
+| `numero_de_exemplo` | Número copiado de um exemplo de estilo — é valor de outro cliente |
+| `outro_cliente` | Nome de gente que não é este cliente |
+| `contradiz_manual` | Afirma o que o seu manual nega |
+| `repergunta` | Pergunta de novo o que o cliente já disse |
+| `e_do_consultor` | Promessa financeira, mesmo sem cifra ("sua parcela vai ficar tranquila") |
+| `malformado` | JSON, bloco de código, "como uma IA", pedaço do prompt, caractere em looping |
+| `injecao` | O cliente tentou mudar as regras do bot |
+| `nao_sei` / `marcador` / `vazio` / `curto` | Texto que não é resposta |
+
+Reprovar **nunca** significa "manda mesmo assim". Significa: não envia, grava o motivo,
+e chama você quando o motivo for do tipo que só gente resolve. Malformado e repergunta
+o bot causou sozinho e resolve sozinho na próxima; valor inventado e dado de outro
+cliente, não.
+
+Nada aqui pergunta pra IA se a resposta da IA está boa. Modelo avaliando o próprio texto
+erra junto.
+
+## Recuperação
+
+| Falha | O que acontece |
+| --- | --- |
+| Rede piscando, Supabase hibernando, 429/503 | Retenta com espera crescente (400ms → 1.2s → 3.6s) |
+| Erro de programação, 401, 404 | Não retenta: repetir bug só gasta o tempo do cliente |
+| Ollama, Groq ou Supabase caindo repetido | Disjuntor abre depois de 4 falhas e para de tentar por 60s |
+| WhatsApp não abre | 3 tentativas, depois apaga a sessão e pede QR; 5 min de descanso |
+| Chrome travado | Sessão limpa no próximo boot, varredura de processos órfãos |
+| Ferramenta de escrita falhando | **Não** retenta — pode ter gravado antes do erro |
+
+Nunca fica reiniciando infinito, e **nunca inventa resposta**: falha esgotada vira
+pendência pro consultor. Com o disjuntor aberto a chamada nem sai, então o cliente vai
+pra Fila na hora em vez de esperar meio minuto por uma resposta que não vem.
+
+## Observabilidade
+
+Em **Atividade** você vê a linha do tempo do agente:
+
+```
+21:03 — Cliente enviou mensagem     · Josenete
+21:03 — Agente identificou a intenção · valor · precisa de você (regra rígida)
+21:03 — Memória atualizada          · aprendi banco
+21:03 — Ferramenta executada        · solicitar_intervencao
+21:03 — Passou para você            · valor
+```
+
+Justificativa operacional curta, nunca raciocínio do modelo — chain-of-thought não ajuda
+a decidir nada e ainda dá a impressão de que a decisão foi do modelo.
+
+Métricas do dia: mensagens recebidas, respostas automáticas, intervenções humanas,
+**taxa de automação**, erros, respostas barradas, tempo médio de resposta, ferramentas
+usadas e por que o bot te chamou.
+
+O diário **nunca guarda** valor, token, chave ou URL com credencial — há uma peneira, e
+há teste dela.
+
+**Status do motor** no topo da mesma tela: ligado, reconectando, erro ou offline. O
+motor grava um batimento a cada 30s; "offline" é a ausência dele. Motor que caiu não
+consegue avisar que caiu.
+
+## Concorrência
+
+O motor atende vários clientes ao mesmo tempo. Um cliente esperando você **não** bloqueia
+os outros — a trava é **por conversa**, não global:
+
+- Cliente ansioso mandando 3 mensagens em 3 segundos → 3 turnos em ordem, 1 resposta
+- Cliente A travado com você → clientes B, C, D seguem normalmente
+- Evento reentregue pelo WhatsApp → ignorado antes de qualquer consulta
+- Mesma ferramenta com os mesmos argumentos no mesmo ciclo → executa uma vez
+- Tarefa que estoura → libera a fila daquela conversa em vez de travá-la pra sempre
+
+Três defesas para três problemas diferentes: trava de arquivo (dois motores), índice
+único em `mensagens.id_whatsapp` (mesma mensagem) e a trava por conversa (mesma conversa).
+
+## O fluxo completo
+
+**Quando o bot dá conta:**
+
+```
+cliente → WhatsApp → motor → contexto + memória → orquestrador → decisão
+   → ferramenta (se precisar) → redação → VALIDATOR → cliente
+```
+
+**Quando falta informação do cliente:**
+
+```
+agente → pergunta só o que falta → cliente responde
+   → memória atualiza → agente continua
+```
+
+**Quando falta informação sua:**
+
+```
+agente → handoff (com o dossiê pronto) → você responde só o dado
+   → agente interpreta → VALIDATOR → cliente recebe → agente continua sozinho
+```
+
+O rascunho nascido da **sua** resposta sai sem segunda aprovação: você já aprovou quando
+respondeu na Fila. O que segura a segurança ali não é a aprovação, é a conferência de
+procedência — todo número tem que estar na sua resposta, senão sai o seu texto cru.
+
+**Freio de loop:** conversa que volta 3× pra sua mão sem sair do lugar passa a ser sua.
+O bot só grava ali até você devolver em Conversas. Ele nunca solta sozinho.
+
+## Memória e perguntas mínimas
+
+O bot lembra de cada cliente: nome, convênio, banco, objetivo e quais documentos já
+chegaram. Uma linha por conversa, em `memoria`. **Nunca guarda valor, parcela ou taxa** —
+isso muda a cada simulação e só você sabe.
+
+O que falta é calculado em `requisitos.js` — código, não IA. Regra de negócio não é
+interpretação, e assim a lógica sobrevive a troca de modelo.
+
+| cliente pergunta | falta documento? | o bot |
+| --- | --- | --- |
+| "quanto libera?" | sim | **pede o documento ao cliente** |
+| "quanto libera?" | não | chama você, com o dossiê pronto |
+
+"Quanto libera?" sem contracheque na mão não é pergunta pra você — é pergunta que
+ninguém pode responder ainda. Isso não fura a regra de ouro: o que sai é uma pergunta,
+sem número nenhum.
+
+No máximo **dois pedidos por mensagem**, e ele desiste do que já pediu duas vezes.
+
+## O que o bot sabe, e o que ele copia
+
+Duas coisas diferentes, nas duas metades de **Meu jeito**:
+
+- **Meu jeito** (`respostas_boas`) — exemplos de **como** você fala. Alimenta o few-shot
+- **O que o bot sabe** (`conhecimento`) — fatos sobre **o que é verdade** na sua operação
+
+O conhecimento **recusa valor, taxa e parcela** ao salvar. CNPJ e endereço passam: são
+fatos da empresa, não do contrato de ninguém — é o que permite responder *"isso não é
+golpe?"*.
 
 ## O funil
 
@@ -163,12 +355,9 @@ Cada conversa tem duas coisas que não se misturam:
 - **etapa** — onde o *cliente* está na venda: novo → conversando → esperando documentos
   → documentos recebidos → em análise → fechado ou perdido
 
-Um cliente pode estar "esperando documentos" e "travado com você" ao mesmo tempo,
-porque perguntou o valor enquanto separava os papéis.
-
-**Quando o cliente manda arquivo** (foto ou PDF), o motor não classifica — reconhece
-como documentação, move a etapa e te manda uma mensagem no seu próprio WhatsApp:
-`📄 Josenete mandou documento.` Você vive no WhatsApp, não no painel.
+**Quando o cliente manda arquivo**, o motor não classifica — reconhece como documentação,
+confirma na memória o que foi pedido por último, move a etapa e te avisa no seu próprio
+WhatsApp. Você vive no WhatsApp, não no painel.
 
 **Quando o cliente some**, o bot cobra sozinho:
 
@@ -178,126 +367,90 @@ como documentação, move a etapa e te manda uma mensagem no seu próprio WhatsA
 | 2ª | 1 dia | 1 dia |
 | 3ª | 3 dias | 3 dias |
 
-Depois da terceira ele para e marca a conversa como perdida. A terceira mensagem já
-se despede em vez de insistir — quem não respondeu três vezes quer ser deixado em paz
-com a porta aberta.
+Depois da terceira ele para e marca como perdida. Nunca antes das 8h nem depois das 20h,
+nunca em conversa silenciada, e **nunca em quem está esperando você**.
 
-Nunca antes das 8h nem depois das 20h, nunca em conversa silenciada, e **nunca em
-quem está esperando você responder** — cobrar alguém que aguarda um número seu é o
-pior tipo de follow-up que existe.
+## Testes
 
-## O que o bot sabe, e o que ele copia
-
-São duas coisas diferentes, e ficam nas duas metades da tela **Meu jeito**:
-
-- **Meu jeito** (`respostas_boas`) — exemplos de **como** você fala. Alimenta o
-  few-shot: o bot lê 2 ou 3 da mesma categoria antes de escrever.
-- **O que o bot sabe** (`conhecimento`) — fatos sobre **o que é verdade** na sua
-  operação: que empresa é, com que bancos trabalha, como funciona a redução de taxa,
-  que documentos pedir. Entra como contexto fixo em todo prompt.
-
-O conhecimento **recusa valor, taxa e parcela** na hora de salvar. Esses números
-mudam por cliente; se ficassem no contexto fixo, o bot passaria a dizê-los para todo
-mundo — furando a regra de ouro por uma porta lateral.
-
-CNPJ e endereço passam: são fatos da empresa, não do contrato de ninguém. É o que
-permite ao bot responder *"isso não é golpe?"*, que é das objeções mais comuns.
-
-## Memória e perguntas mínimas
-
-O bot lembra de cada cliente: nome, convênio, banco, objetivo e quais documentos já
-chegaram. Guardado em `memoria`, uma linha por conversa.
-
-**Ele nunca pergunta duas vezes a mesma coisa.** O que falta é calculado em
-`motor/src/requisitos.js` — código, não IA: regra de negócio não é interpretação, e
-assim a lógica sobrevive a troca de modelo.
-
-A mudança que faz o bot trabalhar sozinho:
-
-| cliente pergunta | falta documento? | o bot |
-| --- | --- | --- |
-| "quanto libera?" | sim | **pede o documento ao cliente** |
-| "quanto libera?" | não | chama você, com o dossiê pronto |
-
-Antes, toda pergunta de dinheiro virava pendência na hora — mas "quanto libera?" sem
-contracheque na mão não é pergunta pra você, é pergunta que ninguém pode responder
-ainda. Isso não fura a regra de ouro: o que sai é uma pergunta, sem número nenhum.
-
-No máximo **dois pedidos por mensagem**, e ele desiste de pedir o que já pediu duas
-vezes — insistir na terceira não traz o documento, traz bloqueio.
-
-## Quem pensa e quem escreve
-
-Dois papéis, dois modelos, trocáveis por variável de ambiente:
-
-- **Pensar** (classificar, extrair fatos) — Ollama local. Vê a mensagem crua, inclusive
-  quando fala de dinheiro. Não sai da máquina.
-- **Escrever** (a mensagem que o cliente lê) — Groq, se `GROQ_API_KEY` estiver
-  configurada; senão o local. Sem chave tudo continua funcionando, só sai mais duro.
-
-**Nenhum dos dois é fonte de verdade para número.** Valor, parcela, saldo, margem e
-taxa vêm de você ou do banco de dados. A IA decide *como* responder, nunca *qual* é o
-dado — garantido em `gatilhos.js` (corta antes) e `numeros.js` (confere depois).
-
-## O ciclo completo
-
-```
-cliente pergunta  →  Fila  →  você digita só o dado ("R$ 4.200, 12x de 380")
-                                     ↓
-                        motor escreve no seu tom  →  Rascunhos
-                                     ↓
-                    você lê, edita se quiser, aprova  →  WhatsApp do cliente
-                                     ↓
-                     a mensagem aprovada vira exemplo em "Meu jeito"
+```bash
+npm test --prefix motor
 ```
 
-Nada é enviado sem passar pela sua aprovação, e o que sai é exatamente o texto que
-estava na tela quando você clicou.
+175 testes, sem rede e sem IA — rodam em segundos.
+
+| Arquivo | Cobre |
+| --- | --- |
+| `gatilhos.test.js` | A regra de ouro, 40 frases reais |
+| `numeros.test.js` | Detector de número inventado, formatos, taxa |
+| `decidir.test.js` | Cada caminho do orquestrador |
+| `requisitos.test.js` | O que falta, quantas vezes pedir, quando desistir |
+| `funil.test.js` | Follow-up: quando cobrar e quando calar |
+| `handoff.test.js` | Handoff, resposta curta, retomada, freio de loop |
+| `ferramentas.test.js` | Argumento inválido, ferramenta inexistente, timeout, erro, repetição |
+| `planejar.test.js` | A peneira do plano do modelo |
+| `validador.test.js` | As 10 checagens, injeção, dado de outro cliente |
+| `concorrencia.test.js` | Vários clientes, mensagens simultâneas, duplicadas |
+| `recuperacao.test.js` | Ollama/Groq/Supabase/WhatsApp fora, retry, disjuntor, peneira de segredo |
+| `agente.test.js` | Os três caminhos do fluxo, ponta a ponta |
 
 ## Publicar na Vercel
 
-Importe o repositório e, nas configurações do projeto:
-
 - **Root Directory:** `painel`
-- **Environment Variables:** `NEXT_PUBLIC_SUPABASE_URL` e
-  `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
-- **Deployment Protection → Vercel Authentication:** desligado, senão só o dono da
-  conta Vercel consegue abrir o painel
+- **Environment Variables:** `NEXT_PUBLIC_SUPABASE_URL` e `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+- **Deployment Protection → Vercel Authentication:** desligado, senão só o dono da conta
+  Vercel consegue abrir o painel
 
-As duas variáveis são `NEXT_PUBLIC_`, ou seja, são gravadas no bundle na hora do
-build. Mudou o valor, precisa **redeploy** — não basta salvar.
+As duas variáveis são `NEXT_PUBLIC_`, gravadas no bundle na hora do build. Mudou o valor,
+precisa **redeploy** — não basta salvar.
 
 O `motor/` fica de fora do deploy: ele só existe na máquina do consultor.
 
 ## Estrutura
 
 ```
-banco/          SQL das tabelas e das políticas de RLS
-painel/         Next.js 16 + TypeScript + Tailwind v4
-  app/          rotas: (conta) login/cadastro, (painel) fila e afins
-  components/   marca, ui, fila, painel, conta
-  lib/          clientes do Supabase, ações de servidor, tipos
-  proxy.ts      sessão e rotas protegidas (era middleware.ts até o Next 15)
-motor/          Node local
+banco/            SQL: tabelas, RLS, migrations 01–18
+painel/           Next.js 16 + TypeScript + Tailwind v4
+  app/(painel)/   fila, rascunhos, conversas, atividade, meu-jeito, conexão, conta
+  components/     marca, ui, fila, painel, conta, conversas, rascunhos, conexão
+  lib/            clientes do Supabase, ações de servidor, tipos, leituras
+  proxy.ts        sessão e rotas protegidas (era middleware.ts até o Next 15)
+motor/
   src/
-    index.js      liga tudo e desliga limpo no Ctrl+C
-    ambiente.js   lê e confere o .env
-    supabase.js   login na conta, com sessão guardada em arquivo
-    estado.js     espelha o estado do motor na tabela conexoes (batida de 30s)
-    whatsapp.js   cliente do WhatsApp, QR e eventos
-    gatilhos.js   A REGRA DE OURO — o que nunca chega na IA
+    index.js        liga tudo, desliga limpo, pega erro solto
+    ambiente.js     lê e confere o .env
+    supabase.js     login na conta, com sessão guardada
+    whatsapp.js     cliente do WhatsApp, QR, eventos, dedup
+    conexoes.js     o maestro: um cliente por número, com reconexão
+    gatilhos.js     A REGRA DE OURO — o que nunca chega na IA
     classificar.js  regra rígida + Ollama, nessa ordem
-    redator.js    escreve no seu tom (few-shot) e se recusa a inventar número
-    fluxo.js      decide entre abrir pendência ou escrever rascunho
-    escuta.js     ouve o painel: respostas da fila e rascunhos aprovados
-  test/           teste da regra de ouro — 40 frases reais
-  sessao/         credenciais do pareamento — gitignorado
+    numeros.js      máscara dos exemplos e conferência de procedência
+    memoria.js      o que o bot lembra de cada cliente
+    requisitos.js   o que falta pra simular ou fechar — código puro
+    redator.js      escreve no seu tom (few-shot)
+    fluxo.js        o orquestrador: retrato → decisão → execução
+    escuta.js       ouve o painel: respostas da fila e rascunhos aprovados
+    funil.js        etapas e follow-up
+    seguimento.js   o cobrador
+    ia.js           quem pensa e quem escreve, com disjuntor
+    resiliencia.js  retry com backoff e disjuntor por dependência
+    travas.js       uma conversa por vez, todas ao mesmo tempo
+    observar.js     o diário do agente, com peneira de segredo
+    batimento.js    o motor diz ao painel que está vivo
+    diagnostico.js  confere tudo e diz o que fazer
+    agente/
+      decidir.js      a decisão — função pura, sem I/O
+      validar.js      o porteiro — 10 checagens antes de enviar
+      ferramentas.js  o registro: 11 ações com contrato
+      executor.js     limite, dedup, timeout, erro, registro
+      planejar.js     o modelo escolhe o que consultar (só leitura)
+  test/             175 testes
+  sessao/           credenciais do pareamento — gitignorado
 ```
 
 ## Identidade
 
 Base preto-tinta quente (`#14110E`), neutros quentes, texto papel. Uma cor de destaque:
 jade `#1FA173`, usada só no item ativo do menu, na ação primária e no sinal do motor.
-Brasa `#E08A3C` é semântico — só aparece para dizer que um cliente está esperando
-demais. Bricolage Grotesque no wordmark e nos títulos, Geist na interface, Geist Mono
-em todo número. Escuro por padrão, claro disponível em **Conta → Tema**.
+Brasa `#E08A3C` é semântico — só aparece para dizer que um cliente está esperando demais.
+Bricolage Grotesque no wordmark e nos títulos, Geist na interface, Geist Mono em todo
+número. Escuro por padrão, claro em **Conta → Tema**.

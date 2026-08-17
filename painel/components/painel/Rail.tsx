@@ -19,6 +19,9 @@ export function Rail({
     { href: "/fila", nome: "Fila", contagem: abertas },
     { href: "/rascunhos", nome: "Rascunhos", contagem: rascunhos },
     { href: "/conversas", nome: "Conversas" },
+    // Onde o consultor confere o que o agente fez sozinho. Fica no bloco de
+    // trabalho, não em ajustes: em modo autônomo isso é rotina, não config.
+    { href: "/atividade", nome: "Atividade" },
     { href: "/meu-jeito", nome: "Meu jeito" },
   ];
 

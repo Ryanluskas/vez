@@ -150,6 +150,31 @@ async function checarBanco(ambiente) {
   }
   ok("Colunas do handoff no lugar");
 
+  /*
+    O diário e o batimento. Estes NÃO derrubam o motor: sem eles o produto
+    atende igual, só fica cego. Avisar e seguir é a resposta certa — parar
+    de atender porque o log não grava seria trocar um problema pequeno por
+    um grande.
+  */
+  const { error: erroDiario } = await supabase
+    .from("acoes_do_agente")
+    .select("tipo")
+    .limit(1);
+
+  const { error: erroMotor } = await supabase
+    .from("motor_estado")
+    .select("estado")
+    .limit(1);
+
+  if (erroDiario || erroMotor) {
+    aviso(
+      "sem observabilidade: o painel não vai mostrar a atividade nem se o motor está de pé",
+      "Rode banco/18_observabilidade.sql"
+    );
+  } else {
+    ok("Diário do agente e batimento no lugar");
+  }
+
   return supabase;
 }
 

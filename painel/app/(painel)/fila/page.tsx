@@ -13,6 +13,7 @@ type LinhaDaFila = {
   pergunta: string;
   contexto: string | null;
   motivo: string | null;
+  categoria: string | null;
   criado_em: string;
   conversas: { nome: string | null; telefone: string } | null;
 };
@@ -28,7 +29,7 @@ export default async function PaginaDaFila() {
   const [{ data, error }, listaDeAtalhos] = await Promise.all([
     supabase
       .from("pendencias")
-      .select("id, pergunta, contexto, motivo, criado_em, conversas(nome, telefone)")
+      .select("id, pergunta, contexto, motivo, categoria, criado_em, conversas(nome, telefone)")
       .eq("status", "aberta")
       .order("criado_em", { ascending: true })
       .returns<LinhaDaFila[]>(),
@@ -85,6 +86,7 @@ export default async function PaginaDaFila() {
                 pergunta={p.pergunta}
                 contexto={p.contexto}
                 motivo={p.motivo}
+                categoria={p.categoria}
                 atalhos={atalhos}
               />
             ))}
