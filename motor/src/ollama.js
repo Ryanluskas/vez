@@ -121,7 +121,22 @@ async function gerarAgora({ prompt, sistema, json = false, temperatura = 0.3 }) 
         ...(json ? { format: "json" } : {}),
         options: {
           temperature: temperatura,
-          num_predict: json ? 120 : 300,
+          /*
+            300 tokens era generoso demais pra uma mensagem de WhatsApp, e
+            generosidade aqui custa segundos: o modelo gera até o limite.
+
+            Isso importa mais do que parece. Medido, o corte de tempo NÃO
+            é confiável quando o Ollama satura o processador: o timer do
+            Node atrasa junto com tudo, e um limite de 35s virou 64s
+            reais. Não dá pra consertar isso com outro timer — o timer é
+            que está atrasado.
+
+            O que dá pra fazer é a geração terminar antes: 160 tokens são
+            ~120 palavras, mais do que qualquer mensagem boa de WhatsApp,
+            e cortam o pior caso quase pela metade. O validador já recusa
+            texto longo demais, então nada aqui piora a mensagem.
+          */
+          num_predict: json ? 120 : 160,
         },
       }),
     });

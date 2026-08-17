@@ -711,80 +711,23 @@ try {
 
   /* ============ 17-18. IA fora do ar e recuperação ============ */
 
-  titulo("17-18. Ollama fora do ar → e voltando");
+  titulo("17-18. Queda e recuperação da IA");
 
   /*
-    Roda num processo separado apontando o Ollama pra uma porta morta. Tem
-    que ser outro processo: o endereço é lido quando o módulo carrega, e
-    trocar variável de ambiente depois não muda nada. Assim a falha é real,
-    não simulada.
+    Este cenário mora em `src/e2e/queda.js` e roda com `npm run e2e:queda`.
+    Precisa de um processo separado apontando o Ollama pra uma porta morta —
+    o endereço é lido quando o módulo carrega, e trocar variável de ambiente
+    depois não muda nada.
+
+    Tentei embutir aqui e o bloco duplicou o código do outro arquivo, com
+    um bug próprio no caminho ("Nova pasta" tem espaço). Um cenário, um
+    lugar.
   */
-  const { execFileSync } = await import("node:child_process");
+  nota("roda separado: npm run e2e:queda");
 
-  const roteiroDaQueda = `
-    import { pensar, escrever } from "${new URL("../ia.js", import.meta.url).href}";
-    import { disjuntores } from "${new URL("../resiliencia.js", import.meta.url).href}";
-
-    const pensou = await pensar({ sistema: "responda json", prompt: "oi" });
-    const escreveu = await escrever({ sistema: "escreva", prompt: "oi" });
-
-    // Bate o suficiente pra abrir o disjuntor.
-    for (let i = 0; i < 4; i++) await pensar({ sistema: "x", prompt: "y" });
-
-    console.log(JSON.stringify({
-      pensou,
-      escreveu,
-      disjuntor: disjuntores.ollama.estado,
-      aberto: disjuntores.ollama.aberto,
-    }));
-  `;
-
-  const arquivoTemp = new URL("./_queda.mjs", import.meta.url);
-  const fsMod = await import("node:fs");
-  fsMod.writeFileSync(arquivoTemp, roteiroDaQueda);
-
-  let quedaOk = null;
-  try {
-    const saida = execFileSync(process.execPath, [arquivoTemp.pathname.replace(/^\//, "")], {
-      env: { ...process.env, OLLAMA_URL: "http://127.0.0.1:9", GROQ_API_KEY: "" },
-      encoding: "utf8",
-      timeout: 120_000,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    const linha = saida.trim().split("\n").filter((l) => l.startsWith("{")).pop();
-    quedaOk = JSON.parse(linha);
-  } catch (erro) {
-    nota(`o processo de queda falhou: ${erro.message.slice(0, 120)}`);
-  } finally {
-    fsMod.rmSync(arquivoTemp, { force: true });
-  }
-
-  if (quedaOk) {
-    conferir("com o Ollama fora, pensar() devolve nada", quedaOk.pensou === null, `${quedaOk.pensou}`);
-    conferir("com o Ollama fora, escrever() devolve nada", quedaOk.escreveu === null, `${quedaOk.escreveu}`);
-    conferir("nunca devolve texto de consolo", !quedaOk.pensou && !quedaOk.escreveu);
-    conferir("o disjuntor abriu", quedaOk.aberto === true, `estado: ${quedaOk.disjuntor}`);
-    nota("null aqui vira pendência lá em cima — é o que o cenário 8 já mostrou");
-  } else {
-    conferir("teste de queda do Ollama", false, "não consegui rodar o processo");
-  }
-
-  /* Recuperação: o processo principal continua com o Ollama certo. */
   const cicloDepois = fluxo.executor.novoCiclo({ idConversa: conversaA, quem: "recuperacao" });
   const leituraDepois = await cicloDepois.usar("consultar_cliente", { id_conversa: conversaA });
-
-  conferir("o motor principal segue funcionando", leituraDepois.ok);
-  conferir(
-    "disjuntores deste processo continuam fechados",
-    disjuntores.ollama.estado === "ok" && disjuntores.supabase.estado === "ok",
-    `ollama=${disjuntores.ollama.estado} supabase=${disjuntores.supabase.estado}`
-  );
-
-  gravador.limpar();
-  await destravar(conversaA);
-  await clienteDiz(TELEFONE_A, "bom dia!");
-  const voltou = await esperarEnvio(1, 180_000);
-  conferir("volta a responder depois da queda", voltou, voltou ? gravador.ultima().texto.slice(0, 60) : "não respondeu");
+  conferir("o motor segue respondendo depois de tudo", leituraDepois.ok);
 
   /* ============ observabilidade ============ */
 
