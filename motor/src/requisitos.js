@@ -90,6 +90,32 @@ function jaTem(memoria, chave) {
 }
 
 /*
+  Troca os nomes de documento por "documento".
+
+  "Extrato de margem" tem a palavra "margem", que é gatilho de dinheiro. Mas
+  PEDIR o extrato — ou dizer "assim que você me mandar o extrato de margem"
+  — não é falar do valor da margem: é falar de um papel, com o nome que o
+  próprio código deu a ele.
+
+  Isso importa porque o bot lê a própria conversa. Ele pede o extrato numa
+  mensagem, e na seguinte o contexto já tem essa frase; qualquer resposta
+  que a referencie era descartada pelo guarda. O cliente perguntava o prazo
+  e recebia "vou verificar", porque a resposta mencionava um documento que o
+  bot mesmo tinha pedido.
+
+  Quem usa isto compara o ANTES e o DEPOIS: se tirar os rótulos faz o
+  gatilho parar de disparar, o que travou era o nome do papel. Se continuar
+  disparando, é dinheiro de verdade e não passa.
+*/
+export function semRotulosDeRequisito(texto) {
+  let limpo = String(texto ?? "");
+  for (const r of Object.values(REQUISITOS)) {
+    limpo = limpo.replaceAll(r.rotulo, "documento");
+  }
+  return limpo;
+}
+
+/*
   Devolve o que falta, mais urgente primeiro.
   `objetivo` decide o tamanho da lista: quem só tirou uma dúvida não precisa
   mandar comprovante de endereço.

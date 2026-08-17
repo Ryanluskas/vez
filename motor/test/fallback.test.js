@@ -11,7 +11,7 @@ import {
 } from "../src/respostas.js";
 import { checarGatilhos } from "../src/gatilhos.js";
 import { numerosDeRisco } from "../src/numeros.js";
-import { montarPedido } from "../src/requisitos.js";
+import { montarPedido, semRotulosDeRequisito } from "../src/requisitos.js";
 import { disjuntor, tentar } from "../src/resiliencia.js";
 import { validarAntesDeEnviar } from "../src/agente/validar.js";
 
@@ -335,4 +335,101 @@ test("entradas estranhas não quebram o fallback", () => {
   assert.doesNotThrow(() => respostaDeterministica({ categoria: null, mensagemCliente: null }));
   assert.doesNotThrow(() => documentoRecebido(null, null));
   assert.doesNotThrow(() => pedirOQueFalta(null, null));
+});
+
+/* ------------------------------------ a segunda chance é UMA, não infinita */
+
+test("o guarda continua valendo na segunda tentativa", () => {
+  /*
+    A segunda tentativa existe porque o modelo às vezes escolhe uma palavra
+    de dinheiro que estava no manual — variação de temperatura, não erro de
+    raciocínio. O que ela NÃO faz é afrouxar nada: passa pelo mesmo crivo.
+
+    Se pudesse tentar até passar, o guarda viraria decoração: bastava rolar
+    o dado até sair o número que eu quero.
+  */
+  const inseguras = [
+    "Consegui liberar R$ 4.200 pra você!",
+    "Sua margem está liberada, pode ficar tranquilo",
+    "Sua parcela vai ficar bem tranquila",
+    "Seu saldo devedor já está quitado",
+  ];
+
+  for (const t of inseguras) {
+    assert.equal(conferido(t), null, `passaria numa segunda tentativa: "${t}"`);
+    assert.equal(validarAntesDeEnviar(t, {}).ok, false, `o validador deixou passar: "${t}"`);
+  }
+});
+
+test("duas tentativas recusadas viram handoff, não terceira tentativa", () => {
+  /*
+    Isto é sobre o contrato de `escreverResposta`: ela devolve null depois
+    da segunda recusa, e quem chamou manda pra Fila com o aviso. Não existe
+    caminho que insista.
+  */
+  const semResposta = null;
+  const pronta = respostaDeterministica({
+    categoria: "prazo",
+    mensagemCliente: "quanto tempo demora?",
+  });
+
+  // Prazo não tem resposta pronta — depende do manual, que é linguagem.
+  assert.equal(pronta, null);
+
+  // Então sobra o aviso, e o cliente não fica sem nada.
+  const aviso = vouVerificar("Antonio", 0);
+  assert.ok(aviso);
+  assert.equal(semResposta ?? aviso, aviso);
+});
+
+/* ------------------------------- nome de documento não é valor */
+
+test("o bot pode falar do papel que ele mesmo pediu", () => {
+  /*
+    "Extrato de margem" tem a palavra "margem". O bot pede esse papel numa
+    mensagem, e a partir daí a frase fica no CONTEXTO da conversa — que é o
+    que ele lê pra responder a próxima.
+
+    Foi assim que "quanto tempo demora pra cair?" virou "vou verificar":
+    a resposta certa mencionava o extrato que o próprio bot tinha pedido.
+  */
+  const podem = [
+    "Depois de aprovado cai em até 2 dias úteis. Assim que você me mandar o extrato de margem eu sigo!",
+    "Recebi seu contracheque! Falta só o extrato de margem.",
+  ];
+
+  for (const t of podem) {
+    assert.equal(checarGatilhos(t).travou, true, "o caso perdeu a graça: não trava mais");
+    assert.equal(
+      checarGatilhos(semRotulosDeRequisito(t)).travou,
+      false,
+      `continuaria barrado: "${t}"`
+    );
+  }
+});
+
+test("trocar o nome do papel NÃO libera falar do valor dele", () => {
+  /*
+    Só entram aqui frases que TRAVAM antes da troca. O ponto do teste é que
+    elas continuam travando depois — a troca não pode virar porta de saída.
+
+    "Sua margem está liberada" não contém o rótulo "extrato de margem",
+    então a troca não toca nela e o gatilho segue de pé.
+  */
+  const naoPodem = [
+    "Sua margem está liberada, pode ficar tranquilo.",
+    "Vi aqui que sobra margem pra você.",
+    "Seu saldo devedor está quitado.",
+    "Consegui liberar R$ 4.200 pra você.",
+    "Sua parcela fica em 96x.",
+  ];
+
+  for (const t of naoPodem) {
+    assert.equal(checarGatilhos(t).travou, true, `o caso não serve: "${t}" já passava`);
+    assert.equal(
+      checarGatilhos(semRotulosDeRequisito(t)).travou,
+      true,
+      `passou com a troca de rótulos: "${t}"`
+    );
+  }
 });

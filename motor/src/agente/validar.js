@@ -1,7 +1,7 @@
 import { ACOES } from "./decidir.js";
 import { checarGatilhos } from "../gatilhos.js";
 import { conferir, numerosDeRisco, sobrouMarcador } from "../numeros.js";
-import { REQUISITOS } from "../requisitos.js";
+import { REQUISITOS, semRotulosDeRequisito } from "../requisitos.js";
 
 /*
   ============================================================================
@@ -103,11 +103,38 @@ export function validarTexto(texto, { permitirNumeros = false, fontesPermitidas 
     tem cifra e mesmo assim é promessa financeira.
   */
   const { travou, motivo } = checarGatilhos(texto);
-  if (travou) {
-    return { ok: false, codigo: "e_do_consultor", motivo: `a IA escreveu sobre valor (${motivo})` };
+  if (!travou) return { ok: true };
+
+  /*
+    ================================================================
+    NOME DE DOCUMENTO NÃO É VALOR
+
+    "Extrato de margem" contém a palavra "margem". O bot pede esse papel
+    numa mensagem, e a frase passa a viver no CONTEXTO da conversa — que
+    é o que ele lê pra responder a próxima.
+
+    Foi assim que o cliente perguntou "quanto tempo demora pra cair?" e
+    recebeu "vou verificar". Reproduzido três vezes em três: a resposta
+    certa mencionava o extrato que o próprio bot tinha pedido.
+
+    A prova é comparativa: troca os nomes de documento por "documento" e
+    roda o gatilho de novo. Parou de disparar? O que travou era o nome do
+    papel. Continua disparando? É dinheiro, e não passa.
+
+    O redator tem esta mesma exceção. Precisa estar nos dois: são dois
+    guardas independentes, e consertar um só deixa o outro barrando —
+    que foi exatamente o que aconteceu aqui.
+
+    O que isto NÃO libera: "sua margem está liberada" não contém o rótulo
+    "extrato de margem", então a troca não muda nada. E número já foi
+    conferido acima, contra as fontes permitidas.
+    ================================================================
+  */
+  if (!checarGatilhos(semRotulosDeRequisito(texto)).travou) {
+    return { ok: true };
   }
 
-  return { ok: true };
+  return { ok: false, codigo: "e_do_consultor", motivo: `a IA escreveu sobre valor (${motivo})` };
 }
 
 /* ------------------------------------------------------------------

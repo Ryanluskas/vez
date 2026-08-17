@@ -1,6 +1,7 @@
 import { escrever } from "./ia.js";
 import { checarGatilhos } from "./gatilhos.js";
 import { mascarar, conferir, sobrouMarcador } from "./numeros.js";
+import { semRotulosDeRequisito } from "./requisitos.js";
 import { log } from "./log.js";
 
 /*
@@ -87,7 +88,47 @@ function seguro(texto, { permitirNumeros = false, manual = "" } = {}) {
     if (conferir(texto, manual).length === 0) return true;
   }
 
-  log.alerta(`Rascunho descartado: a IA escreveu sobre valor (${motivo}).`);
+  /*
+    ================================================================
+    NOME DE DOCUMENTO NÃO É VALOR
+
+    "Extrato de margem" tem a palavra "margem". O bot pede esse papel numa
+    mensagem, e a partir daí a frase fica no CONTEXTO da conversa — que é
+    o que ele lê pra responder a próxima.
+
+    Foi assim que o cliente perguntou "quanto tempo demora pra cair?" e
+    recebeu "vou verificar": a resposta certa mencionava o extrato de
+    margem que o próprio bot tinha pedido, e o guarda a descartava. Duas
+    tentativas seguidas, mesma recusa — não era sorte do modelo, era o
+    contexto.
+
+    A prova aqui é comparativa: troca os nomes de documento por
+    "documento" e roda o gatilho de novo. Parou de disparar? Então o que
+    travou era o nome do papel. Continua disparando? É dinheiro de
+    verdade, e não passa.
+
+    O que isto NÃO libera: "sua margem está liberada" não contém o rótulo
+    "extrato de margem", então a troca não muda nada e continua barrado.
+    E o número, se houver, já foi conferido acima.
+    ================================================================
+  */
+  if (!checarGatilhos(semRotulosDeRequisito(texto)).travou) {
+    // Sem número inventado, é o bot falando do papel que ele mesmo pediu.
+    if (conferir(texto, manual).length === 0) return true;
+  }
+
+  /*
+    Mostra o texto barrado. Sem isso, "descartei porque falou de valor" é
+    impossível de investigar — passei três rodadas de teste adivinhando qual
+    palavra tinha disparado o gatilho.
+
+    Vai só pro terminal, que é a máquina do consultor e já mostra as
+    mensagens dos clientes na íntegra. NÃO vai pro diário: aquele é gravado
+    no banco, e é justamente onde valor não pode entrar.
+  */
+  log.alerta(
+    `Rascunho descartado: a IA escreveu sobre valor (${motivo}).\n   texto: ${texto.replace(/\n/g, " ").slice(0, 160)}`
+  );
   return false;
 }
 
@@ -173,26 +214,62 @@ export async function escreverResposta({
     que sempre vale, isto é o que importa agora. O modelo pequeno presta
     mais atenção no que está mais perto da tarefa.
   */
-  const texto = await escrever({
-    sistema:
-      `Você é o próprio consultor de crédito consignado respondendo seu cliente no WhatsApp. Escreva na primeira pessoa, como ele escreveria.\n` +
-      montarManual(manual) +
-      (consultas ? `\nSOBRE ESTA PERGUNTA, especificamente:\n${consultas.trim()}\n` : "") +
-      (memoria ? `\n${memoria}\nNunca pergunte de novo algo que já está aí.\n` : "") +
-      `\n${REGRA_DE_OURO}`,
-    prompt:
-      `${montarExemplos(exemplos)}\n` +
-      (contexto ? `Conversa até agora:\n${contexto}\n\n` : "") +
-      `Agora responda esta mensagem${nomeCliente ? ` de ${nomeCliente}` : ""}: "${mensagemCliente}"`,
-    temperatura: 0.4,
-  });
+  const sistema =
+    `Você é o próprio consultor de crédito consignado respondendo seu cliente no WhatsApp. Escreva na primeira pessoa, como ele escreveria.\n` +
+    montarManual(manual) +
+    (consultas ? `\nSOBRE ESTA PERGUNTA, especificamente:\n${consultas.trim()}\n` : "") +
+    (memoria ? `\n${memoria}\nNunca pergunte de novo algo que já está aí.\n` : "") +
+    `\n${REGRA_DE_OURO}`;
+
+  const prompt =
+    `${montarExemplos(exemplos)}\n` +
+    (contexto ? `Conversa até agora:\n${contexto}\n\n` : "") +
+    `Agora responda esta mensagem${nomeCliente ? ` de ${nomeCliente}` : ""}: "${mensagemCliente}"`;
 
   /*
     O que as consultas trouxeram conta como fonte permitida de número pelo
     mesmo motivo que o manual conta: saiu da tabela `conhecimento`, que
     quem escreveu foi o consultor. Nada aqui vem do modelo.
   */
-  return seguro(texto, { manual: `${manual}\n${consultas}` }) ? texto : null;
+  const fontes = { manual: `${manual}\n${consultas}` };
+
+  const primeira = await escrever({ sistema, prompt, temperatura: 0.4 });
+  if (seguro(primeira, fontes)) return primeira;
+
+  /*
+    ================================================================
+    UMA SEGUNDA CHANCE, E SÓ UMA
+
+    O guarda recusou. Na maioria das vezes não é porque a resposta
+    estava errada — é porque o modelo escolheu uma palavra de dinheiro
+    que estava no manual. Medido: perguntando "quanto tempo demora pra
+    cair", dez tentativas passaram e a décima primeira mencionou margem.
+    É variação de temperatura, não erro de raciocínio.
+
+    Perguntar de novo custa ~500ms no Groq e converte um handoff em
+    resposta. O que NÃO muda é o guarda: a segunda tentativa passa
+    exatamente pelo mesmo crivo, e se ela também tocar em dinheiro, o
+    caso é do consultor.
+
+    Duas e pronto. Insistir até passar seria rolar o dado até dar o
+    número que eu quero — e aí o guarda vira decoração.
+  */
+  if (primeira === null) return null;
+
+  const segunda = await escrever({
+    sistema:
+      `${sistema}\n\nIMPORTANTE: a resposta anterior foi recusada por tocar em ` +
+      `valor, parcela, saldo ou margem. Responda de novo SEM citar nenhuma dessas coisas.`,
+    prompt,
+    temperatura: 0.2,
+  });
+
+  if (seguro(segunda, fontes)) {
+    log.info("Segunda tentativa passou no guarda.");
+    return segunda;
+  }
+
+  return null;
 }
 
 /*
