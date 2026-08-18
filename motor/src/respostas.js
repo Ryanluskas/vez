@@ -1,4 +1,5 @@
 import { REQUISITOS } from "./requisitos.js";
+import { primeiroNome } from "./abordagem.js";
 import { checarGatilhos } from "./gatilhos.js";
 
 /*
@@ -33,8 +34,17 @@ import { checarGatilhos } from "./gatilhos.js";
   ============================================================================
 */
 
+/*
+  Só o primeiro nome, sempre.
+
+  O nome que chega até aqui é o do contato do WhatsApp, e vem inteiro:
+  "Ademar Elleres". "Ademar Elleres, recebi seus documentos" não é como
+  ninguém escreve pra alguém que conhece — é como um sistema escreve. E o
+  produto inteiro depende do cliente achar que tem gente do outro lado.
+*/
 function comNome(nome, frase) {
-  return nome ? `${nome}, ${frase.charAt(0).toLowerCase()}${frase.slice(1)}` : frase;
+  const curto = primeiroNome(nome);
+  return curto ? `${curto}, ${frase.charAt(0).toLowerCase()}${frase.slice(1)}` : frase;
 }
 
 /* Varia pra não parecer robô repetindo a mesma linha o dia inteiro. */
@@ -46,23 +56,36 @@ function umaDelas(lista, semente = Date.now()) {
    Saudação
 ------------------------------------------------------------------ */
 
+/*
+  O nome entra DENTRO da saudação, não antes dela.
+
+  "Ademar, oi! Tudo bem?" não é como ninguém escreve. "Oi Ademar! Tudo
+  bem?" é. A vírgula-vocativa funciona pra afirmação ("Ademar, recebi seus
+  documentos") e soa mecânica pro cumprimento — daí o {nome} no meio.
+
+  E são DUAS frases, não três. "Oi! Tudo bem? Me conta o que você precisa."
+  é uma abertura de atendente de call center: cumprimenta, pergunta como
+  vai, e já emite o convite formal. Consultor manda "Oi Ademar! Tudo bem?"
+  e espera — o cliente diz o que quer sem precisar ser convidado.
+*/
 const SAUDACOES = [
-  "Oi! Tudo bem? Como posso te ajudar?",
-  "Oi! Tudo bom por aí? Me conta o que você precisa.",
-  "Oi! Tudo certo? Em que posso ajudar?",
+  "Oi{nome}! Tudo bem?",
+  "Oi{nome}, tudo bom?",
+  "Opa{nome}! Tudo certo?",
 ];
 
 const AGRADECIMENTOS = [
-  "Imagina! Qualquer coisa é só me chamar.",
-  "Tô à disposição! Precisando, me chama.",
-  "Por nada! Se precisar de mais alguma coisa, é só falar.",
+  "Imagina{nome}! Qualquer coisa é só chamar.",
+  "Por nada{nome}! Precisando, me chama.",
+  "Tranquilo{nome}! Qualquer dúvida é só falar.",
 ];
 
 const ELE_AGRADECEU = /\b(?:obrigad[oa]|vlw|valeu|agradec|show|ótimo|otimo|perfeito|legal|beleza|blz|ok|entendi|certo)\b/i;
 
 export function saudacao(mensagemCliente, nomeCliente, semente) {
   const lista = ELE_AGRADECEU.test(mensagemCliente ?? "") ? AGRADECIMENTOS : SAUDACOES;
-  return comNome(nomeCliente, umaDelas(lista, semente));
+  const curto = primeiroNome(nomeCliente);
+  return umaDelas(lista, semente).replace("{nome}", curto ? ` ${curto}` : "");
 }
 
 /* ------------------------------------------------------------------
@@ -121,13 +144,24 @@ export function informacaoRecebida(fatos, nomeCliente) {
 ------------------------------------------------------------------ */
 
 /*
-  O texto já vem montado de `requisitos.js`, que é código. Aqui só embrulha
-  numa frase inteira — é o mesmo texto que já sai hoje quando o redator
-  falha, agora como primeira opção em vez de último recurso.
+  O texto já vem montado de `requisitos.js`, que é código. Aqui só coloca o
+  nome e a pontuação.
+
+  Tinha um embrulho — "Pra eu conseguir te responder, X. Pode ser?" — e ele
+  fazia duas coisas ruins. A primeira era visível: o pedido do convênio já
+  termina em interrogação, então a frase saía "...servidor público?. Pode
+  ser?", com a pontuação dobrada.
+
+  A segunda era o embrulho em si. Consultor não justifica o pedido nem pede
+  licença pra fazê-lo; ele pergunta. "Ademar, me manda seu contracheque
+  atualizado." é a mensagem. O resto era enchimento que só fazia a frase
+  passar de cem caracteres.
 */
 export function pedirOQueFalta(pedido, nomeCliente) {
-  if (!pedido?.texto) return null;
-  return comNome(nomeCliente, `Pra eu conseguir te responder, ${pedido.texto}. Pode ser?`);
+  const texto = pedido?.texto?.trim();
+  if (!texto) return null;
+
+  return comNome(nomeCliente, texto.endsWith("?") ? texto : `${texto}.`);
 }
 
 /* ------------------------------------------------------------------
@@ -146,13 +180,37 @@ export function pedirOQueFalta(pedido, nomeCliente) {
   responder — que é exatamente o que é verdade.
 */
 const VOU_VERIFICAR = [
-  "Recebi sua mensagem! Vou verificar isso aqui e já te respondo.",
-  "Anotei aqui! Deixa eu confirmar uma coisa e já te retorno.",
-  "Recebi! Vou dar uma olhada e te respondo em seguida.",
+  "Vou confirmar isso certinho e já te retorno.",
+  "Deixa eu conferir aqui e já te falo.",
+  "Vou dar uma olhada e te respondo em seguida.",
 ];
 
 export function vouVerificar(nomeCliente, semente) {
   return comNome(nomeCliente, umaDelas(VOU_VERIFICAR, semente));
+}
+
+/* ------------------------------------------------------------------
+   "Mas você nem pediu isso"
+------------------------------------------------------------------ */
+
+/*
+  Isto é correção, não pergunta.
+
+  O bot pediu documento numa etapa em que documento não era o assunto, e o
+  cliente reclamou — com razão. Repetir o pedido depois disso é a pior
+  resposta possível: confirma que ninguém está lendo.
+
+  Um consultor de verdade recua: "você tem razão, me adiantei". Recuar
+  custa uma frase e salva a conversa; insistir custa o cliente.
+*/
+const ME_ADIANTEI = [
+  "Você tem razão, me adiantei aqui. Vamos por partes.",
+  "Verdade, me adiantei. Deixa eu voltar um passo.",
+  "É justo, pulei uma etapa. Vamos com calma.",
+];
+
+export function meAdiantei(nomeCliente, semente) {
+  return comNome(nomeCliente, umaDelas(ME_ADIANTEI, semente));
 }
 
 /* ------------------------------------------------------------------

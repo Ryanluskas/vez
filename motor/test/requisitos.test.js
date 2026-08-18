@@ -36,12 +36,39 @@ test("não pergunta o que já sabe", () => {
   assert.ok(falta.includes("contracheque"));
 });
 
-test("junta o que falta numa mensagem só", () => {
+test("pede UMA coisa por mensagem, na ordem de urgência", () => {
+  /*
+    Era dois por mensagem, e dois não cabem numa frase de WhatsApp: dava
+    140 caracteres com duas interrogações, cara de formulário. Ninguém
+    responde a duas perguntas — responde a primeira e ignora a segunda, e
+    aí o bot pergunta a segunda de novo, o que parece que ele não leu.
+  */
   const m = memoria({ convenio: "inss", banco: "Santander" });
   const pedido = montarPedido(m);
 
-  assert.match(pedido.texto, / e /, "deveria juntar dois pedidos numa frase");
-  assert.equal(pedido.chaves.length, 2);
+  assert.equal(pedido.chaves.length, 1, "interrogatório de novo");
+  assert.equal(pedido.chaves[0], "contracheque", "o mais urgente primeiro");
+  assert.equal(pedido.faltamAinda, 1, "o resto vem na próxima mensagem");
+
+  // E a frase cabe numa linha.
+  assert.ok(pedido.texto.length <= 60, `${pedido.texto.length} caracteres`);
+});
+
+test("o que sobrou vem na mensagem seguinte, não se perde", () => {
+  let m = memoria({ convenio: "inss", banco: "Santander" });
+
+  const primeiro = montarPedido(m);
+  assert.equal(primeiro.chaves[0], "contracheque");
+
+  // Cliente mandou o contracheque.
+  m = memoria({
+    convenio: "inss",
+    banco: "Santander",
+    coletado: { contracheque: confirmado },
+  });
+
+  const segundo = montarPedido(m);
+  assert.equal(segundo.chaves[0], "margem", "esqueceu o que faltava");
 });
 
 test("com tudo coletado, não pede mais nada e libera a simulação", () => {

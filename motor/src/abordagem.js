@@ -29,8 +29,34 @@ export const ABORDAGEM_PADRAO =
   "a taxa de juros e liberar um valor pra você, sem aumentar nada na folha. " +
   "Posso te mandar a simulação?";
 
+/*
+  Só o primeiro nome.
+
+  O que chega aqui é o nome do contato do WhatsApp — "Ademar Elleres",
+  "Maria Da Silva Santos". Ninguém cumprimenta alguém pelo nome completo.
+  "Oi Ademar Elleres, aqui é o Ryan" é a assinatura de mala-direta, e é a
+  PRIMEIRA linha que o cliente lê: ele decide ali se está falando com uma
+  pessoa ou com um disparo.
+
+  Nomes de partícula ("de", "da", "dos") não contam como primeiro nome, e
+  nome de uma palavra só passa inteiro.
+*/
+const PARTICULA = /^(?:d[aeio]s?|e)$/i;
+
+export function primeiroNome(nome) {
+  const partes = String(nome ?? "")
+    .trim()
+    .split(/\s+/)
+    .filter((p) => p && !PARTICULA.test(p));
+
+  return partes[0] ?? null;
+}
+
 export function montarAbordagem({ nome, banco = "Santander" }) {
-  return ABORDAGEM_PADRAO.replace("{NOME}", nome ?? "tudo bem").replace("{BANCO}", banco);
+  return ABORDAGEM_PADRAO.replace("{NOME}", primeiroNome(nome) ?? "tudo bem").replace(
+    "{BANCO}",
+    banco
+  );
 }
 
 /*

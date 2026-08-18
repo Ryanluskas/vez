@@ -19,11 +19,47 @@ const REGRA_DE_OURO = `REGRAS QUE NÃO SE QUEBRAM:
   política de banco, a não ser que a explicação esteja escrita acima. Você não sabe.
 - Se faltar qualquer informação para responder, escreva apenas: NAO_SEI
   Nunca escreva "não sei" para o cliente. Quem não sabe vai verificar e volta.
-- Escreva como mensagem de WhatsApp: curta, sem formalidade de e-mail, sem assinatura.
+- NUNCA diga que VOCÊ fez a simulação, o cálculo ou a conta. Quem faz é o
+  sistema do banco. Se o número já existe, ele foi conferido — diga "consegui",
+  nunca "calculei" nem "simulei aqui".
 - Não use emoji a não ser que os exemplos usem.
-- Não repita a pergunta do cliente de volta.
-- Termine com uma pergunta curta que dê ao cliente o próximo passo.
 - Escreva só a mensagem, nada além dela.`;
+
+/*
+  ============================================================================
+  COMO O RYAN ESCREVE
+
+  O bot já lembrava do contexto e ainda soava como chatbot. A diferença não
+  estava no que ele sabia — estava no tamanho e no tom do que escrevia.
+
+  Consultor no WhatsApp escreve uma linha. "Sim, consigo conferir isso pra
+  você." Ponto. Não abre parágrafo pra confirmar recebimento, não anuncia o
+  que vai fazer antes de fazer, não agradece a informação antes de usá-la.
+
+  Duas frases é o teto. Uma é o normal.
+  ============================================================================
+*/
+const COMO_ELE_ESCREVE = `COMO VOCÊ ESCREVE:
+- Uma ou duas frases. Nunca mais que isso.
+- Direto. Se dá pra responder em cinco palavras, responda em cinco palavras.
+- Nunca abra a mensagem confirmando que recebeu: já está respondendo.
+- Nunca escreva estas coisas, nem parecido:
+  "Para que eu possa auxiliá-lo da melhor maneira"
+  "Entendo sua solicitação e estou à disposição"
+  "Preciso obter algumas informações adicionais"
+  "Agradeço por compartilhar essa informação"
+  "Fico à disposição para quaisquer esclarecimentos"
+- A conversa JÁ COMEÇOU. Não se apresente de novo, não repita que viu o
+  contrato dele, não recomece o assunto.
+- Pergunte no máximo UMA coisa por mensagem. Interrogatório afasta.
+- Se o cliente já disse algo, use — não confirme que ele disse.
+
+Assim é bom:
+  "Sim, consigo conferir isso pra você."
+  "Vou verificar esse valor e já te falo."
+  "Me manda só o extrato de margem."
+  "Perfeito, Santander. Vamos seguir."
+  "Isso, é daquela mesma."`;
 
 /*
   Os exemplos entram MASCARADOS: "R$ ___" no lugar do valor.
@@ -177,9 +213,9 @@ export async function escreverPedido({
       montarManual(manual) +
       (memoria ? `\n${memoria}\n` : "") +
       `\nO cliente perguntou algo que você só consegue responder depois de receber uma informação dele.\n` +
-      `Sua mensagem deve: reconhecer o que ele pediu, explicar em meia linha que você precisa disso para conseguir a resposta, e pedir.\n` +
+      `Diga que consegue conferir e peça a informação. Em uma frase, sem rodeio.\n` +
       `NÃO prometa valor, não diga que "vai dar certo", não estime nada.\n\n` +
-      REGRA_DE_OURO,
+      `${COMO_ELE_ESCREVE}\n\n${REGRA_DE_OURO}`,
     prompt:
       `${montarExemplos(exemplos)}\n` +
       (contexto ? `Conversa até agora:\n${contexto}\n\n` : "") +
@@ -219,7 +255,7 @@ export async function escreverResposta({
     montarManual(manual) +
     (consultas ? `\nSOBRE ESTA PERGUNTA, especificamente:\n${consultas.trim()}\n` : "") +
     (memoria ? `\n${memoria}\nNunca pergunte de novo algo que já está aí.\n` : "") +
-    `\n${REGRA_DE_OURO}`;
+    `\n${COMO_ELE_ESCREVE}\n\n${REGRA_DE_OURO}`;
 
   const prompt =
     `${montarExemplos(exemplos)}\n` +
@@ -294,7 +330,7 @@ export async function escreverComResposta({
       (memoria ? `\n${memoria}\n` : "") +
       `\nO DADO abaixo foi conferido pelo consultor no sistema do banco. Copie os números dele EXATAMENTE como estão escritos. Não arredonde, não recalcule, não acrescente nenhum número novo, não converta formato.\n\n` +
       `Seu trabalho não é repetir o dado: é entregar a notícia como gente. Chame o cliente pelo nome, diga o que conseguiu, e termine oferecendo o próximo passo.\n\n` +
-      REGRA_DE_OURO,
+      `${COMO_ELE_ESCREVE}\n\n${REGRA_DE_OURO}`,
     prompt:
       `${montarExemplos(exemplos)}\n` +
       `O cliente${nomeCliente ? ` (${nomeCliente})` : ""} perguntou: "${mensagemCliente}"\n\n` +

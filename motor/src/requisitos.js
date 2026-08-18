@@ -109,8 +109,21 @@ function exigidosPara(para, estado) {
   return emProspeccao ? PARA_SIMULAR_EM_PROSPECCAO : PARA_SIMULAR;
 }
 
-/* Quantos pedidos cabem numa mensagem sem virar formulário. */
-const MAXIMO_POR_MENSAGEM = 2;
+/*
+  UM pedido por mensagem.
+
+  Era dois, e dois não cabem numa frase de WhatsApp. O resultado ficava
+  assim: "pra eu conseguir te responder, você é aposentado/pensionista do
+  INSS ou servidor público? e em qual banco está seu empréstimo hoje?" —
+  140 caracteres, duas interrogações, cara de formulário.
+
+  Ninguém responde a duas perguntas por mensagem no WhatsApp. Responde a
+  primeira e ignora a segunda, e aí o bot pergunta a segunda de novo — o
+  que parece que ele não leu.
+
+  Uma pergunta, resposta, próxima pergunta. É como a conversa acontece.
+*/
+const MAXIMO_POR_MENSAGEM = 1;
 
 function jaTem(memoria, chave) {
   if (!memoria) return false;

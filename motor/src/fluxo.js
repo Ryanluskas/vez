@@ -12,7 +12,7 @@ import { criarLista } from "./lista.js";
 import { numerosDeRisco } from "./numeros.js";
 import * as respostas from "./respostas.js";
 import { resolver, perguntaQueAmarra, tirarOQueJaSei, oQueJaSei } from "./referencias.js";
-import { ehAbordagem, aceitouAAbordagem } from "./abordagem.js";
+import { ehAbordagem, aceitouAAbordagem, primeiroNome } from "./abordagem.js";
 import { exemplosComBase } from "./estilo.js";
 import { log } from "./log.js";
 
@@ -330,7 +330,7 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
     const texto = await escreverPedido({
       pedido: pedido.texto,
       mensagemCliente: porque,
-      nomeCliente: lembrado?.nome ?? nomeCliente,
+      nomeCliente: primeiroNome(lembrado?.nome ?? nomeCliente),
       contexto,
       exemplos: await exemplosDaCategoria("documentos"),
       manual: await manualDaOperacao(),
@@ -404,7 +404,7 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
     const texto = await escreverComResposta({
       mensagemCliente: pergunta,
       respostaDoConsultor: dados.texto,
-      nomeCliente: lembrado?.nome ?? nomeCliente,
+      nomeCliente: primeiroNome(lembrado?.nome ?? nomeCliente),
       exemplos,
       manual,
       memoria: memoria.emTexto(lembrado),
@@ -431,7 +431,7 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
       exemplos,
       manual,
       memoria: lembrado,
-      nomeCliente: lembrado?.nome ?? nomeCliente,
+      nomeCliente: primeiroNome(lembrado?.nome ?? nomeCliente),
       contextoDaConversa: contexto,
       mensagemCliente: pergunta,
     });
@@ -645,8 +645,40 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
       return false;
     }
 
-    /* ---- Ele diz que já informou, ou contesta o pedido ---- */
-    if (referencia.alvo === "ja_informado" || referencia.alvo === "contesta_pedido") {
+    /*
+      ---- Ele contesta o pedido: "mas você nem pediu isso" ----
+
+      Isto é correção, não pergunta. O bot pediu documento numa etapa em
+      que documento não era o assunto, e ele reclamou — com razão.
+
+      Repetir o pedido aqui é a pior resposta possível: confirma que
+      ninguém está lendo. Recuar custa uma frase.
+    */
+    if (referencia.alvo === "contesta_pedido") {
+      const texto = respostas.conferido(respostas.meAdiantei(nome, Date.now()));
+      if (!texto) return false;
+
+      /*
+        Recuar de verdade significa parar de pedir. O contador de pedidos
+        volta ao ponto em que ele estava, senão o próximo pedido sai igual
+        e a desculpa não valeu nada.
+      */
+      await memoria.mudarEtapaComercial(conversa.id, "interesse", null);
+
+      const sozinho = await abrirRascunho({
+        idConversa: conversa.id,
+        texto,
+        categoria: "saudacao",
+      });
+
+      log.info(
+        `→ ${sozinho ? "RESPONDENDO" : "rascunho"}  ${nomeCliente ?? ""} · recuei, ele tinha razão`
+      );
+      return true;
+    }
+
+    /* ---- Ele diz que já informou ---- */
+    if (referencia.alvo === "ja_informado") {
       if (!referencia.tenho) return false;
 
       /*
@@ -716,8 +748,9 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
   }
 
   function comNomeNaFrente(nome, frase) {
-    if (!nome) return frase.charAt(0).toUpperCase() + frase.slice(1);
-    return `${nome}, ${frase.charAt(0).toLowerCase()}${frase.slice(1)}`;
+    const curto = primeiroNome(nome);
+    if (!curto) return frase.charAt(0).toUpperCase() + frase.slice(1);
+    return `${curto}, ${frase.charAt(0).toLowerCase()}${frase.slice(1)}`;
   }
 
   function juntar(lista) {
@@ -1295,7 +1328,7 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
       const semIa = respostas.respostaDeterministica({
         categoria,
         mensagemCliente: texto,
-        nomeCliente: lembrado?.nome ?? nomeCliente,
+        nomeCliente: primeiroNome(lembrado?.nome ?? nomeCliente),
         fatosNovos: novosFatos,
         semente: Date.now(),
       });
@@ -1339,7 +1372,7 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
       const comecouAEscrever = Date.now();
       const rascunho = await escreverResposta({
         mensagemCliente: texto,
-        nomeCliente: lembrado?.nome ?? nomeCliente,
+        nomeCliente: primeiroNome(lembrado?.nome ?? nomeCliente),
         contexto,
         exemplos,
         manual,
@@ -1402,7 +1435,7 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
         exemplos,
         manual,
         memoria: lembrado,
-        nomeCliente: lembrado?.nome ?? nomeCliente,
+        nomeCliente: primeiroNome(lembrado?.nome ?? nomeCliente),
         contextoDaConversa: contexto,
         mensagemCliente: texto,
       });
@@ -1496,7 +1529,7 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
       const texto = await escreverComResposta({
         mensagemCliente: pendencia.pergunta,
         respostaDoConsultor: pendencia.resposta,
-        nomeCliente: conversa?.nome,
+        nomeCliente: primeiroNome(conversa?.nome),
         exemplos,
         manual,
         memoria: memoria.emTexto(lembrado),
@@ -1517,7 +1550,7 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
         exemplos,
         manual,
         memoria: lembrado,
-        nomeCliente: conversa?.nome,
+        nomeCliente: primeiroNome(conversa?.nome),
         mensagemCliente: pendencia.pergunta,
       });
 
