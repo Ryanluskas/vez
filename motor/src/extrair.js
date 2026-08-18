@@ -223,6 +223,8 @@ export function aindaFalta(memoria, achados) {
   return campos.some((c) => !memoria?.[c] && !achados?.[c]);
 }
 
+import { oQueEstaReferenciando } from "./referencias.js";
+
 /*
   Esta mensagem tem CARA de conter algum fato sobre o cliente?
 
@@ -240,6 +242,34 @@ const SO_CUMPRIMENTO =
 export function pareceTerFato(texto) {
   const t = String(texto ?? "").trim();
   if (!t) return false;
+
+  /*
+    ================================================================
+    PONTEIRO PRA TRÁS NÃO CARREGA FATO
+
+    "Aquele valor", "você já me disse", "já mandei", "mas você nem
+    pediu isso" — nenhuma dessas frases diz nada NOVO sobre o cliente.
+    São referências ao que já foi dito, e o que elas apontam já está no
+    estado ou não está em lugar nenhum.
+
+    Medido no teste do Ademar: as quatro mensagens do cliente eram
+    todas referências, e as quatro chamaram o extrator. Com o modelo
+    local frio isso é 12 segundos cada, quatro vezes, pra voltar vazio
+    quatro vezes — e era a razão de o modo autônomo não fechar conta.
+
+    Quem responde a essas frases é `referencias.js`, lendo o estado.
+    Ninguém precisa de modelo pra isso.
+    ================================================================
+  */
+  if (oQueEstaReferenciando(t)) return false;
+
+  /*
+    Resposta de uma palavra também não carrega fato. "Sim", "não" e
+    "aquele" já saem pelo filtro de cumprimento; isto pega o resto
+    ("pode", "beleza então", "isso mesmo") sem precisar listar tudo:
+    duas palavras não formam "sou aposentado do INSS".
+  */
+  if (t.split(/\s+/).length <= 2 && !/\d/.test(t)) return false;
 
   /*
     Cumprimento sozinho, ou combinação de cumprimentos, não carrega fato.

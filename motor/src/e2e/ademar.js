@@ -268,11 +268,64 @@ try {
   );
   if (p3.respondeu) referenciasResolvidas++;
 
+  /* ---------------- 3b. Ninguém ouve o mesmo número duas vezes ---------------- */
+
+  /*
+    Isto lê a tabela, não o log. Os envios são assíncronos e as linhas
+    aparecem fora de ordem no terminal — foi assim que uma duplicata
+    passou despercebida numa rodada anterior.
+
+    A pergunta é objetiva: entre tudo que o agente escreveu pra este
+    cliente, quantas mensagens carregam o número da simulação? Uma. Ele
+    ouviu, e depois disso o agente confirma sem repetir.
+  */
+  {
+    const { data: tudo } = await supabase
+      .from("rascunhos")
+      .select("texto_sugerido, categoria, criado_em")
+      .eq("id_conversa", idConversa)
+      .order("criado_em");
+
+    const comONumero = (tudo ?? []).filter((r) => /4\.?200/.test(r.texto_sugerido ?? ""));
+
+    conferir(
+      "disse o número UMA vez, não repetiu",
+      comONumero.length <= 1,
+      `${comONumero.length} mensagem(ns) com o número`
+    );
+
+    for (const r of tudo ?? []) {
+      console.log(`    [2m· ${r.categoria.padEnd(15)} ${r.texto_sugerido.slice(0, 70)}[0m`);
+    }
+  }
+
   /* ---------------- 4. "Mas por quê? Você nem pediu isso" ---------------- */
 
   passo('CLIENTE — "Mas por quê? Você nem pediu isso"');
 
   const p4 = await clienteDiz("Mas por quê? Você nem pediu isso");
+
+  /*
+    Lido da tabela, não do que a escuta alcançou enviar. Os envios são
+    assíncronos: a resposta da mensagem anterior pode cair dentro da
+    janela desta, e foi assim que uma rodada mostrou a confirmação de
+    valor no lugar do recuo. O último rascunho da conversa é o que este
+    passo produziu.
+  */
+  const { data: ultimos } = await supabase
+    .from("rascunhos")
+    .select("texto_sugerido")
+    .eq("id_conversa", idConversa)
+    .order("criado_em", { ascending: false })
+    .limit(1);
+
+  const oRecuo = ultimos?.[0]?.texto_sugerido ?? "";
+
+  conferir(
+    "recuou de verdade: admitiu, não confirmou valor",
+    /raz[ãa]o|verdade|justo|adiantei|etapa/i.test(oRecuo),
+    oRecuo.slice(0, 80) || "(nada)"
+  );
 
   conferir(
     "respondeu olhando o que já tem, sem reiniciar",

@@ -27,6 +27,8 @@
   ============================================================================
 */
 
+import { valorConfiavel } from "./valores.js";
+
 function simplificar(texto) {
   return String(texto ?? "")
     .toLowerCase()
@@ -44,9 +46,22 @@ function simplificar(texto) {
 */
 const APONTAM_PARA = [
   /* O número da simulação. */
+  /*
+    "Você JÁ me disse o valor" — afirmação, não pergunta.
+
+    Vem antes de "simulacao" porque é mais específico, e leva a uma
+    resposta diferente: ele não está pedindo o número, está dizendo que já
+    recebeu. Se eu tenho o número, repito. Se não tenho, ele tem razão e
+    quem errou fui eu — a resposta certa começa admitindo isso, não
+    perguntando "qual valor?".
+  */
+  [
+    "valor_ja_dito",
+    /\b(?:voce|vc)\s+ja\s+(?:me\s+)?(?:disse|falou|passou|mandou|informou)\b|\bja\s+(?:tinha\s+)?(?:me\s+)?(?:dito|falado|passado)\s+(?:o\s+)?valor\b/,
+  ],
   [
     "simulacao",
-    /\b(?:aquele|esse|este|o)\s+valor\b|\bvalor\s+(?:que|da simula)|(?:me\s+)?(?:disse|falou|passou|mandou)\s+(?:o\s+)?valor\b|\ba\s+simula[cç][aã]o\b|\baquela\s+simula/,
+    /\b(?:aquele|esse|este|o)\s+valor\b|\bvalor\s+(?:que|da simula)|(?:me\s+)?(?:disse|falou|passou|mandou)\s+(?:o\s+)?valor\b|\ba\s+simula[cç][aã]o\b|\baquela\s+simula|^\s*aquele\s*[.!?]*$/,
   ],
   /* O contrato de que se falou. */
   [
@@ -106,21 +121,31 @@ export function resolver(mensagem, memoria) {
   const alvo = oQueEstaReferenciando(mensagem);
   if (!alvo) return null;
 
-  if (alvo === "simulacao") {
-    const s = memoria?.simulacao ?? {};
-    const temNumero = !!(s.valor || s.parcela || s.taxa);
+  if (alvo === "simulacao" || alvo === "valor_ja_dito") {
+    /*
+      A pergunta não é "existe número?" — é "existe número de fonte que eu
+      possa citar?". Número de procedência desconhecida conta como
+      ausência: ele não sai daqui pro cliente.
+    */
+    const confiavel = valorConfiavel(memoria);
 
-    return temNumero
-      ? { alvo, tenho: true, simulacao: s, de: s.de ?? null }
-      : {
-          alvo,
-          tenho: false,
-          /*
-            NÃO inventa. A pergunta é só pra amarrar a referência — e é uma
-            pergunta, não um número.
-          */
-          precisoConfirmar: "qual simulação",
-        };
+    if (confiavel.tem) {
+      return { alvo, tenho: true, simulacao: confiavel.simulacao, de: confiavel.de };
+    }
+
+    return {
+      alvo,
+      tenho: false,
+      porque: confiavel.porque,
+      /*
+        NÃO inventa e NÃO repergunta.
+
+        As duas saídas dizem a mesma coisa de jeitos diferentes: vou
+        confirmar. A de "valor_ja_dito" começa dando razão a ele, porque
+        ele tem — se eu deveria ter o número e não tenho, o furo é meu.
+      */
+      precisoConfirmar: alvo === "valor_ja_dito" ? "ele diz que eu já passei" : "qual simulação",
+    };
   }
 
   if (alvo === "contrato") {
@@ -196,26 +221,67 @@ export function oQueJaSei(memoria) {
   Estas frases não têm número e não prometem nada — o guarda de saída
   confere isso de qualquer forma.
 */
-const PERGUNTAS = {
-  /*
-    Duas palavras não cabem aqui: "valor" e "simulação". As duas versões
-    anteriores usaram uma delas e o guarda recusou as duas — corretamente,
-    porque ele não sabe distinguir "a simulação que te passei" de "faço uma
-    simulação pra você".
+/*
+  ============================================================================
+  O QUE DIZER QUANDO NÃO SE TEM O NÚMERO
 
-    Reescrever é mais barato que abrir exceção. A pergunta continua fazendo
-    o trabalho: amarrar a referência sem prometer nada.
+  Isto era uma pergunta e virou uma afirmação, e a mudança é de regra de
+  negócio, não de estilo.
+
+  O agente perguntava "você fala do que eu te passei antes, certo?". Do
+  lado do cliente, isso é a mesma coisa que ele já tinha ouvido: alguém
+  pedindo que ele repita o que já disse. Ele acabou de afirmar que o valor
+  já foi informado — devolver uma pergunta confirma que ninguém anotou.
+
+  A resposta certa não pergunta nada. Ela reconhece e assume o próximo
+  passo: vou confirmar. Isso é verdade (a Fila ou a ferramenta vão
+  atrás), não promete número, e não devolve o trabalho pro cliente.
+
+  E quando ele diz "você JÁ me disse", começa dando razão a ele. Se o
+  valor deveria estar aqui e não está, quem falhou não foi ele.
+
+  SOBRE A FRASE QUE NÃO PÔDE SER USADA
+
+  A frase pedida foi "Você tem razão. Vou confirmar esse valor aqui pra
+  não te passar errado." O guarda de dinheiro recusa: ela contém a palavra
+  "valor". Está certo em recusar — ele não distingue "vou confirmar esse
+  valor" de "esse valor é R$ 4.200", e a exceção que deixasse a primeira
+  passar deixaria a segunda também.
+
+  Tirar a palavra custa nada e a frase diz exatamente o mesmo.
+  ============================================================================
+*/
+const SEM_O_DADO = {
+  /*
+    Ele cobra o número e eu não tenho de fonte nenhuma. Não pergunto qual
+    — assumo que vou atrás.
   */
-  "qual simulação":
-    "Você fala do que eu te passei antes, certo? Deixa eu conferir aqui e já te confirmo.",
+  "qual simulação": "Deixa eu confirmar isso aqui certinho e já te retorno.",
+
+  /*
+    Ele afirma que eu já passei. Se eu tivesse, teria repetido; como não
+    tenho, ele tem razão sobre a conversa e eu é que perdi o fio.
+  */
+  "ele diz que eu já passei": "Você tem razão. Vou confirmar aqui pra não te passar errado.",
+
   "qual contrato": "Você fala do contrato que a gente conversou, né? Só pra eu confirmar aqui.",
   "qual documento": "Qual deles você mandou? Não achei aqui, me desculpa.",
-  "o que ele já informou": "Me ajuda a lembrar: o que você já tinha me passado?",
+
+  /*
+    Ele diz que já informou e o estado está vazio. Pedir pra ele repetir é
+    o pior desfecho possível: é exatamente a reclamação dele.
+  */
+  "o que ele já informou": "Você tem razão. Deixa eu conferir aqui e já te falo.",
 };
 
-export function perguntaQueAmarra(referencia) {
+/*
+  A frase pra quando a referência não resolve. Nome antigo era
+  `perguntaQueAmarra`, e mudou porque a maioria destas já não pergunta
+  nada — chamar de "pergunta" escondia justamente a correção.
+*/
+export function comoResponderSemTer(referencia) {
   if (!referencia || referencia.tenho) return null;
-  return PERGUNTAS[referencia.precisoConfirmar] ?? null;
+  return SEM_O_DADO[referencia.precisoConfirmar] ?? null;
 }
 
 /* ------------------------------------------------------------------

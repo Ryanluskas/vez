@@ -99,6 +99,32 @@ const GATILHOS = [
     padrao: /\b(libera|liberam|liberar|liberou|liberado|liberada|liberacao)\b/,
   },
   {
+    /*
+      "Dar" no sentido de dinheiro: "quanto dá?", "dá quanto?", "vai dar
+      quanto?".
+
+      Nao entrou em VERBO_DE_DINHEIRO junto com os outros, e a razao e
+      uma so: acento. `simplificar` tira acentos antes de comparar, entao
+      "da" (verbo) e "da" (preposicao) viram a mesma coisa — e a
+      preposicao esta em toda frase da operacao: "da margem", "da
+      simulacao", "da taxa", "quanto falta da documentacao".
+
+      Posto solto na lista de verbos, ele travaria a metade das frases
+      inocentes. Aqui cada forma exige posicao verbal:
+
+        "da quanto"        preposicao nunca e seguida de "quanto"
+        "vai/pode dar quanto"   auxiliar antes, so verbo cabe
+        "quanto ... da?"   preposicao nunca termina a frase
+
+      A ultima e a que faz o trabalho pesado, e e por isso que ela exige
+      o fim da frase. "quanto da margem sobrou" nao casa aqui — e nem
+      precisa, "margem" ja tem gatilho proprio.
+    */
+    motivo: "perguntou quanto libera",
+    padrao:
+      /\bda\s+quanto\b|\b(?:vai|vou|pode|poderia|deve|deveria|iria)\s+dar\s+quanto\b|\bdar(?:ia|iam)?\s+quanto\b|\bquanto\s+dar(?:ia|iam)?\b|\bquanto\s+(?:que\s+|voce\s+|vc\s+|isso\s+|ele\s+|ela\s+)*da\s*[?!.]*$/,
+  },
+  {
     motivo: "falou em valor",
     padrao: /\b(valor|valores|quantia|montante)\b/,
   },

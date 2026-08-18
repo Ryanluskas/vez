@@ -214,6 +214,49 @@ export function meAdiantei(nomeCliente, semente) {
 }
 
 /* ------------------------------------------------------------------
+   "Você já me disse" — e eu já disse mesmo
+------------------------------------------------------------------ */
+
+/*
+  O número já foi pro cliente e ele volta a apontar pra ele.
+
+  Repetir o texto inteiro é o que um sistema faz. Medido no teste do
+  Ademar: ele disse "você já me disse o valor" e recebeu de volta,
+  palavra por palavra, a mesma mensagem que tinha acabado de ler. A
+  frase dele era literalmente "eu já sei isso" — e a resposta foi
+  dizer de novo.
+
+  Um consultor confirma e segue: "isso mesmo, é essa que te passei".
+  Sem número, porque o número ele já tem; ele não está pedindo o dado,
+  está checando que os dois estão falando da mesma coisa.
+*/
+const JA_TE_FALEI = [
+  "Isso mesmo, é essa que te passei antes.",
+  "Isso, é essa mesma. Quer que eu já dê entrada?",
+];
+
+/*
+  A variante vem da CONTAGEM, não de sorteio.
+
+  Era `Date.now()` e duas confirmações seguidas caíram na mesma frase:
+  "exato, é essa que te mandei" duas vezes, uma atrás da outra. Sorteio
+  não garante variação — garante que às vezes varia.
+
+  A contagem garante. E ela faz mais: a segunda frase já empurra pro
+  próximo passo, porque quem repete que já sabe o número não quer ouvir
+  o número, quer andar.
+
+  Devolve null quando acabaram as variantes. Isso não é falta de texto —
+  é o sinal de que o bot não está resolvendo, e quem chama trata como
+  handoff. Cliente que diz três vezes "você já me disse" precisa de
+  gente, não de uma terceira paráfrase.
+*/
+export function jaTeFalei(nomeCliente, quantasVezesJaConfirmei = 0) {
+  const frase = JA_TE_FALEI[quantasVezesJaConfirmei];
+  return frase ? comNome(nomeCliente, frase) : null;
+}
+
+/* ------------------------------------------------------------------
    A escolha
 ------------------------------------------------------------------ */
 
@@ -288,4 +331,23 @@ export function conferido(texto) {
   }
 
   return checarGatilhos(semRotulos).travou ? null : texto;
+}
+
+/*
+  Este texto é uma das minhas confirmações de "já te passei"?
+
+  Serve pra contar quantas vezes já confirmei nesta conversa, e por isso
+  compara com as frases de verdade em vez de procurar palavra solta —
+  "isso mesmo" aparece em resposta legítima de outro assunto.
+*/
+export function ehConfirmacaoDeQueJaFalei(texto) {
+  /*
+    Sem caixa: `comNome` minusculiza a primeira letra ao prefixar o nome,
+    então o texto gravado é "Ademar, isso mesmo…" e a frase original é
+    "Isso mesmo…". Comparando com caixa, a contagem dava sempre zero e as
+    duas confirmações saíam idênticas — que era exatamente o defeito que
+    esta contagem existe pra evitar.
+  */
+  const t = String(texto ?? "").toLowerCase();
+  return JA_TE_FALEI.some((frase) => t.includes(frase.toLowerCase()));
 }

@@ -11,7 +11,8 @@ import { criarTravas } from "./travas.js";
 import { criarLista } from "./lista.js";
 import { numerosDeRisco } from "./numeros.js";
 import * as respostas from "./respostas.js";
-import { resolver, perguntaQueAmarra, tirarOQueJaSei, oQueJaSei } from "./referencias.js";
+import { resolver, comoResponderSemTer, tirarOQueJaSei, oQueJaSei } from "./referencias.js";
+import { comoChamarAFonte, jaFoiDito } from "./valores.js";
 import { ehAbordagem, aceitouAAbordagem, primeiroNome } from "./abordagem.js";
 import { exemplosComBase } from "./estilo.js";
 import { log } from "./log.js";
@@ -182,6 +183,52 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
       : (data ?? []).map((f) => `${f.assunto}: ${f.conteudo}`).join("\n");
     manualEm = Date.now();
     return manualGuardado;
+  }
+
+  /*
+    ==================================================================
+    O QUE EU JÁ DISSE, MAIS O QUE ESTÁ SAINDO
+
+    `contextoDaConversa` lê da tabela `mensagens`, e ela só recebe a
+    linha de saída DEPOIS que a escuta enviou de fato. Entre decidir e
+    registrar existe uma janela, e cliente ansioso escreve dentro dela.
+
+    Medido: o Ademar mandou "aquele valor" e, em seguida, "você já me
+    disse o valor". A segunda entrou antes de a primeira resposta ficar
+    registrada — o agente olhou o histórico, não viu o número, e mandou
+    o mesmo texto de novo. Exatamente o que o cliente estava dizendo que
+    não precisava.
+
+    A trava por conversa serializa o PROCESSAMENTO, não o envio, então
+    ela não resolve isto.
+
+    O rascunho resolve: ele é criado no instante da decisão. Se existe
+    rascunho com aquele número, o número já foi dito ou está a caminho —
+    e nos dois casos repetir é errado.
+    ==================================================================
+  */
+  async function oQueJaFalei(idConversa) {
+    const [contexto, { data: rascunhos }] = await Promise.all([
+      contextoDaConversa(idConversa),
+      supabase
+        .from("rascunhos")
+        .select("texto_sugerido")
+        .eq("id_conversa", idConversa)
+        .order("criado_em", { ascending: false })
+        .limit(TAMANHO_DO_CONTEXTO),
+    ]);
+
+    const meus = (rascunhos ?? []).map((r) => r.texto_sugerido ?? "");
+
+    return {
+      tudo: [contexto ?? "", ...meus].join("\n"),
+      /*
+        Quantas vezes eu já confirmei "é essa mesma" sem trazer nada
+        novo. Passa da conta e o assunto deixa de ser o número: vira o
+        cliente não conseguindo seguir, e isso é caso de gente.
+      */
+      confirmacoes: meus.filter((t) => respostas.ehConfirmacaoDeQueJaFalei(t)).length,
+    };
   }
 
   async function jaTemPendenciaAberta(idConversa) {
@@ -388,6 +435,31 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
     chamou manda pra Fila, que é o caminho de sempre.
     ==================================================================
   */
+  /*
+    ==================================================================
+    QUEM PÔS O NÚMERO DECIDE QUEM CONFERE
+
+    Esta função gravava `origem: "lista"` fixo, e isso custava caro: um
+    valor que VOCÊ digitou na Fila virava rascunho esperando a sua
+    aprovação. A sua, de novo, do mesmo número que você acabou de dar.
+
+    Do lado do cliente isso é silêncio. Ele perguntou "aquele valor" e
+    não recebeu nada, porque o produto estava pedindo autorização pra
+    repetir o que o dono já tinha autorizado.
+
+    `abrirRascunho` já sabia a diferença e ninguém contava pra ele:
+
+      consultor   você olhou o caso e digitou. Sai sozinho.
+      lista       planilha casada por telefone — ninguém conferiu se é o
+                  número DESTA pessoa. Sempre espera seu OK.
+      ferramenta  veio de sistema, pelo executor. Trata como lista:
+                  correto na origem, não conferido pra este cliente.
+
+    Note o que NÃO mudou: a conferência de procedência dos números
+    continua acontecendo antes, e um número que não esteja na fonte
+    continua sendo barrado. O que mudou é só quem precisa clicar depois.
+    ==================================================================
+  */
   async function responderComALista({
     conversa,
     nomeCliente,
@@ -396,6 +468,7 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
     lembrado,
     dados,
     categoria,
+    origem = "lista",
   }) {
     const manual = await manualDaOperacao();
     const exemplos = await exemplosDaCategoria(categoria);
@@ -447,15 +520,17 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
       return false;
     }
 
-    await abrirRascunho({
+    const sozinho = await abrirRascunho({
       idConversa: conversa.id,
       texto,
       categoria,
-      origem: "lista",
+      origem,
     });
 
     log.destaque(
-      `→ RASCUNHO  ${nomeCliente ?? ""} · valores da lista "${dados.de}" · esperando seu OK`
+      sozinho
+        ? `→ RESPONDENDO  ${nomeCliente ?? ""} · com o número que ${dados.de} passou`
+        : `→ RASCUNHO  ${nomeCliente ?? ""} · valores de "${dados.de}" · esperando seu OK`
     );
     return true;
   }
@@ -580,20 +655,38 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
   }) {
     const nome = lembrado?.nome ?? nomeCliente;
 
-    /* ---- Aponta pra simulação ---- */
-    if (referencia.alvo === "simulacao") {
+    /* ---- Aponta pro número: "aquele valor", "você já me disse o valor" ---- */
+    if (referencia.alvo === "simulacao" || referencia.alvo === "valor_ja_dito") {
       if (!referencia.tenho) {
         /*
-          Não tenho o número. NÃO invento, e também não recomeço: pergunto
-          só o que amarra, e mando pra Fila porque quem tem o valor é você.
-        */
-        const amarra = respostas.conferido(perguntaQueAmarra(referencia));
+          Não tenho número de fonte confiável. Três coisas que NÃO faço:
+          inventar, estimar, ou devolver a pergunta pro cliente.
 
-        if (amarra) {
+          O que sai é o reconhecimento — "vou confirmar" — e ele sai
+          SOZINHO, em qualquer modo. É texto fixo escrito à mão, sem
+          número e sem IA no meio; um reconhecimento que espera aprovação
+          não é reconhecimento, é o mesmo silêncio de antes.
+
+          Em paralelo o caso vai pra Fila, que é onde o número existe.
+        */
+        const reconhece = respostas.conferido(comoResponderSemTer(referencia));
+
+        if (reconhece) {
           await abrirRascunho({
             idConversa: conversa.id,
-            texto: comNomeNaFrente(nome, amarra),
-            categoria: "valor",
+            texto: comNomeNaFrente(nome, reconhece),
+            /*
+              Categoria "saudacao", não "valor", e a diferença é o que a
+              frase É: ela não carrega número nenhum e nunca vai carregar
+              — é a admissão de que o número está sendo buscado. Marcá-la
+              como "valor" a prendia atrás da barreira financeira e o
+              cliente ficava sem resposta justamente no caso em que o
+              agente não tem nada a dizer.
+
+              O guarda de dinheiro roda em cima dela do mesmo jeito, logo
+              acima, no `conferido()`.
+            */
+            categoria: "saudacao",
           });
         }
 
@@ -603,13 +696,18 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
           nomeCliente,
           lembrado,
           pergunta,
-          motivo: "ele cobrou o valor da simulação e eu não tenho o número",
+          motivo:
+            referencia.alvo === "valor_ja_dito"
+              ? "ele diz que eu já passei o valor e eu não tenho o número"
+              : "ele cobrou o valor da simulação e eu não tenho o número",
           categoria: "valor",
-          // Já mandei a pergunta que amarra; dois avisos seguidos é ruído.
-          avisar: !amarra,
+          // Já reconheci; dois avisos seguidos é ruído.
+          avisar: !reconhece,
         });
 
-        log.destaque(`→ FILA  ${nomeCliente ?? ""} · cobrou a simulação, e o número é seu`);
+        log.destaque(
+          `→ FILA  ${nomeCliente ?? ""} · ${referencia.porque ?? "não tenho o número"}, e ele é seu`
+        );
         return true;
       }
 
@@ -618,6 +716,49 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
         validador vai conferir é exatamente ele.
       */
       const s = referencia.simulacao;
+
+      /*
+        Mas já contei? Então confirmo, não repito.
+
+        Ele acabou de ler o número. Mandar de novo, palavra por palavra,
+        é o que fazia o produto parecer máquina — ainda mais quando a
+        mensagem dele é justamente "você já me disse". Um consultor
+        responde "isso mesmo, é essa que te passei" e segue.
+
+        Sem número nesta frase de propósito: ele já tem o número. O que
+        falta é a confirmação de que os dois falam da mesma coisa.
+      */
+      const falado = await oQueJaFalei(conversa.id);
+
+      if (jaFoiDito(s, falado.tudo)) {
+        /*
+          `jaTeFalei` devolve null quando acabam as variantes — sinal de
+          que já confirmei duas vezes e ele continua voltando ao mesmo
+          ponto. Aí o problema não é o número: é a conversa travada, e
+          quem destrava é você. Caindo fora do `if`, segue pro caminho
+          normal, que termina em Fila com aviso.
+        */
+        const texto = respostas.conferido(respostas.jaTeFalei(nome, falado.confirmacoes));
+
+        if (texto) {
+          const sozinho = await abrirRascunho({
+            idConversa: conversa.id,
+            texto,
+            /*
+              Não é categoria "valor": a frase não carrega número e nunca
+              vai carregar. Marcar como "valor" a prenderia atrás da
+              barreira financeira e o cliente ficaria sem resposta no
+              caso em que o agente não tem nada de novo a dizer.
+            */
+            categoria: "acompanhamento",
+          });
+
+          log.destaque(
+            `→ ${sozinho ? "RESPONDENDO" : "rascunho"}  ${nomeCliente ?? ""} · já tinha passado esse número`
+          );
+          return true;
+        }
+      }
       const comoTexto = [
         s.valor ? `valor ${s.valor}` : null,
         s.parcela ? `parcela ${s.parcela}` : null,
@@ -632,14 +773,18 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
         pergunta,
         contexto,
         lembrado,
-        dados: { texto: comoTexto, de: s.de === "lista" ? "sua lista" : "você" },
+        dados: { texto: comoTexto, de: comoChamarAFonte(s.de) },
         categoria: "valor",
+        /*
+          A procedência viaja junto. Número que VOCÊ deu sai sozinho —
+          você já conferiu quando digitou. Número de lista ou de
+          ferramenta continua esperando seu OK, porque ninguém confirmou
+          que aquela linha é desta pessoa.
+        */
+        origem: s.de === "consultor" ? "consultor" : "lista",
       });
 
-      if (respondeu) {
-        log.destaque(`→ RASCUNHO  ${nomeCliente ?? ""} · retomei a simulação que ${s.de} passou`);
-        return true;
-      }
+      if (respondeu) return true;
 
       // Não deu pra escrever com segurança: segue o caminho normal.
       return false;
@@ -724,7 +869,7 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
     /* ---- Ele diz que já mandou documento ---- */
     if (referencia.alvo === "documento_enviado") {
       if (!referencia.tenho) {
-        const amarra = respostas.conferido(perguntaQueAmarra(referencia));
+        const amarra = respostas.conferido(comoResponderSemTer(referencia));
         if (!amarra) return false;
 
         await abrirRascunho({

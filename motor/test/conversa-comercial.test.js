@@ -4,7 +4,7 @@ import {
   oQueEstaReferenciando,
   resolver,
   oQueJaSei,
-  perguntaQueAmarra,
+  comoResponderSemTer,
   tirarOQueJaSei,
 } from "../src/referencias.js";
 import {
@@ -129,9 +129,16 @@ test("3. 'quanto libera?' em prospecção vai pra VOCÊ, não vira interrogatór
    4-6. As referências
    ================================================================ */
 
-test("4. 'você já me disse o valor' aponta pra simulação", () => {
-  assert.equal(oQueEstaReferenciando("Você já me disse o valor"), "simulacao");
-  assert.equal(oQueEstaReferenciando("você ja me disse o valor"), "simulacao");
+test("4. 'você já me disse o valor' é afirmação, não pedido", () => {
+  /*
+    Separado de "aquele valor" porque leva a outra resposta. "Aquele
+    valor" pergunta; "você já me disse o valor" AFIRMA que a resposta já
+    foi dada. Quando não tenho o número, ele tem razão — e a resposta
+    certa começa admitindo isso.
+  */
+  assert.equal(oQueEstaReferenciando("Você já me disse o valor"), "valor_ja_dito");
+  assert.equal(oQueEstaReferenciando("você ja me disse o valor"), "valor_ja_dito");
+  assert.equal(oQueEstaReferenciando("vc já me passou"), "valor_ja_dito");
 });
 
 test("5. 'aquele valor' aponta pra simulação", () => {
@@ -169,7 +176,7 @@ test("14. lembra o valor quando ele existe na memória", () => {
 
   const r = resolver("Você já me disse o valor", comValor);
 
-  assert.equal(r.alvo, "simulacao");
+  assert.equal(r.alvo, "valor_ja_dito");
   assert.equal(r.tenho, true);
   assert.equal(r.simulacao.valor, "4200 em 12x de 380");
   assert.equal(r.de, "consultor", "sem procedência, o validador não teria contra o que conferir");
@@ -182,39 +189,65 @@ test("15. NÃO inventa o valor quando ele não existe", () => {
   assert.equal(r.simulacao, undefined, "não pode existir valor de consolo");
 
   /*
-    E o que sai não é uma investigação nova: é UMA pergunta que amarra a
-    referência, sem número nenhum.
-  */
-  const pergunta = perguntaQueAmarra(r);
-  assert.ok(pergunta);
-  assert.equal(numerosDeRisco(pergunta).length, 0);
+    E o que sai NÃO é uma pergunta.
 
-  /*
-    Ela aponta pro que foi conversado — sem dizer "valor" nem "simulação".
-    As duas palavras são gatilho de dinheiro, e o guarda recusa o texto que
-    as usa. Reescrever saiu mais barato que abrir exceção pra elas.
+    Era: "você fala do que eu te passei antes, certo?". Do lado do
+    cliente isso é mais um pedido pra ele repetir o que já disse — a
+    reclamação que ele acabou de fazer. Agora o agente assume o próximo
+    passo em vez de devolver o trabalho.
   */
-  assert.match(pergunta, /te passei|conversamos|antes/i);
-  assert.equal(checarGatilhos(pergunta).travou, false);
-
-  // E continua sendo pergunta, não afirmação.
-  assert.match(pergunta, /\?/);
+  const resposta = comoResponderSemTer(r);
+  assert.ok(resposta);
+  assert.equal(numerosDeRisco(resposta).length, 0);
+  assert.equal(/\?/.test(resposta), false, `voltou a perguntar: "${resposta}"`);
+  assert.match(resposta, /confirmar|conferir/i, "não disse o que vai fazer");
+  assert.equal(checarGatilhos(resposta).travou, false);
 });
 
-test("15b. a procedência da simulação nunca é o modelo", () => {
-  /*
-    O estado só aceita 'consultor' ou 'lista'. Isso não é convenção: é o
-    que faz o número guardado ser diferente de número inventado.
-  */
-  const doModelo = depoisDaAbordagem({
-    simulacao: { valor: "9999", de: "modelo" },
-  });
+test("15a. quando ele diz que EU já passei, a resposta dá razão a ele", () => {
+  const r = resolver("Você já me disse o valor", depoisDaAbordagem());
+  assert.equal(r.tenho, false);
 
-  const r = resolver("aquele valor", doModelo);
-  // O resolvedor devolve o que está lá; quem recusa 'modelo' é a gravação.
-  assert.equal(r.tenho, true);
-  assert.notEqual(r.de, "consultor");
-  assert.notEqual(r.de, "lista");
+  const resposta = comoResponderSemTer(r);
+  assert.match(resposta, /raz[ãa]o/i, "não reconheceu que o furo é meu");
+  assert.equal(/\?/.test(resposta), false, `reperguntou: "${resposta}"`);
+  assert.equal(numerosDeRisco(resposta).length, 0);
+  assert.equal(checarGatilhos(resposta).travou, false);
+});
+
+test("15b. número sem procedência confiável conta como ausente", () => {
+  /*
+    Antes, a gravação recusava `de: "modelo"` e a LEITURA devolvia o que
+    estivesse lá. Duas regras diferentes pro mesmo dado.
+
+    Isso deixava um furo estreito e real: linha gravada por outro
+    caminho, linha antiga de antes do campo `de`, campo que virou null
+    numa migração. Em todos esses o número existe e ninguém sabe quem
+    colocou — e o agente citava como se fosse seu.
+
+    Agora a pergunta é a mesma nas duas pontas: de onde veio? Sem
+    resposta, o número não existe.
+  */
+  for (const de of ["modelo", "cliente", null, undefined, ""]) {
+    const suspeito = depoisDaAbordagem({ simulacao: { valor: "9999", de } });
+    const r = resolver("aquele valor", suspeito);
+
+    assert.equal(r.tenho, false, `aceitou número de origem "${de}"`);
+    assert.equal(r.simulacao, undefined, `vazou o número de origem "${de}"`);
+
+    // E o que sai no lugar não tem número nenhum.
+    const resposta = comoResponderSemTer(r);
+    assert.equal(numerosDeRisco(resposta).length, 0);
+    assert.equal(/9999/.test(resposta), false);
+  }
+});
+
+test("15c. as três fontes confiáveis passam", () => {
+  for (const de of ["consultor", "lista", "ferramenta"]) {
+    const r = resolver("aquele valor", depoisDaAbordagem({ simulacao: { valor: "4200", de } }));
+    assert.equal(r.tenho, true, `recusou a fonte "${de}"`);
+    assert.equal(r.de, de);
+  }
 });
 
 /* ================================================================
@@ -428,7 +461,7 @@ test("nenhuma pergunta que amarra a referência tem número", () => {
 
   for (const frase of ["aquele valor", "já mandei", "você já sabe", "aquele contrato"]) {
     const r = resolver(frase, semNada);
-    const p = perguntaQueAmarra(r);
+    const p = comoResponderSemTer(r);
     if (!p) continue;
 
     assert.equal(numerosDeRisco(p).length, 0, `tem número: "${p}"`);
