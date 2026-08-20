@@ -11,7 +11,12 @@ import {
 import { classificarPorRegra } from "../src/classificar.js";
 import { checarGatilhos } from "../src/gatilhos.js";
 import { numerosDeRisco, conferir } from "../src/numeros.js";
-import { validarAntesDeEnviar, validarTexto } from "../src/agente/validar.js";
+import {
+  validarAntesDeEnviar,
+  validarTexto,
+  oQueSumiuDaResposta,
+  afirmouSerTudoSemBase,
+} from "../src/agente/validar.js";
 import { decidir, podeAgirSozinho, ACOES } from "../src/agente/decidir.js";
 import { pareceTerFato, extrairPorRegra } from "../src/extrair.js";
 import {
@@ -689,4 +694,87 @@ test("o aviso de handoff nunca sai igual duas vezes seguidas", () => {
   */
   assert.equal(vouVerificar("Ryan", 3), null);
   assert.equal(vouVerificar("Ryan", 10), null);
+});
+
+/* ================================================================
+   A IA não encurta nem completa a resposta do consultor
+   ================================================================ */
+
+/*
+  Isto custou um cliente.
+
+  O consultor digitou na Fila, três vezes: "preciso de: documento com foto,
+  comprovante de endereço, contracheque atualizado e agência/conta".
+
+  E o cliente recebeu:
+    "Me manda uma foto do seu documento com foto pra começar."
+    "Sim, só isso. Me manda uma foto do seu documento pra começar."
+    "Me manda uma foto do seu documento pra começar."
+
+  Três documentos sumiram, e na segunda a IA AFIRMOU que aquilo era tudo —
+  contradizendo a própria resposta que recebeu. O cliente escreveu "tenho
+  certeza que o banco não pede só isso" e parou de responder.
+
+  A causa foi uma instrução de estilo minha ("nunca escreva lista, peça um
+  por vez") vazando pro caminho em que a resposta do consultor é a fonte da
+  verdade.
+*/
+const RESPOSTA_DELE =
+  "preciso de: documento com foto, comprovante de endereço, contracheque atualizado e agência/conta";
+
+test("a IA não pode descartar itens que o consultor pediu", () => {
+  const encurtadas = [
+    "Me manda uma foto do seu documento com foto pra começar.",
+    "Me manda uma foto do seu documento pra começar.",
+    "Preciso do seu documento com foto e do comprovante de endereço.",
+  ];
+
+  for (const t of encurtadas) {
+    const sumiu = oQueSumiuDaResposta(t, RESPOSTA_DELE);
+    assert.ok(sumiu.length > 0, `deixou passar texto encurtado: "${t}"`);
+  }
+
+  // O texto completo passa, escrito de outro jeito ou não.
+  for (const t of [
+    RESPOSTA_DELE,
+    "Preciso de documento com foto, comprovante de endereço, contracheque atualizado e agência/conta. Pode mandar?",
+    "Me manda documento com foto, comprovante de endereço, contracheque e agência/conta.",
+  ]) {
+    assert.deepEqual(oQueSumiuDaResposta(t, RESPOSTA_DELE), [], `barrou texto completo: "${t}"`);
+  }
+});
+
+test("a IA não pode afirmar que aquilo é tudo por conta própria", () => {
+  /*
+    "Sim, só isso" é uma alegação sobre o que o banco exige. Quem sabe
+    isso é o consultor — a IA não pode decidir um requisito de negócio.
+  */
+  for (const t of [
+    "Sim, só isso. Me manda uma foto do seu documento.",
+    "É só isso mesmo, pode mandar.",
+    "Só preciso disso.",
+    "Isso e mais nada.",
+  ]) {
+    assert.equal(afirmouSerTudoSemBase(t, RESPOSTA_DELE), true, `deixou passar: "${t}"`);
+  }
+
+  // Se o CONSULTOR disse que é só isso, a IA pode repetir.
+  assert.equal(
+    afirmouSerTudoSemBase("Sim, só isso mesmo.", "é só isso mesmo, mais nada"),
+    false
+  );
+
+  // E texto que não afirma nada disso passa.
+  assert.equal(afirmouSerTudoSemBase(RESPOSTA_DELE, RESPOSTA_DELE), false);
+});
+
+test("um item só não dispara a conferência de lista", () => {
+  /*
+    Quando o consultor pede uma coisa só, o agente pode reescrever à
+    vontade — não há o que descartar. A conferência existe pra lista.
+  */
+  assert.deepEqual(
+    oQueSumiuDaResposta("Me manda seu contracheque atualizado.", "manda o contracheque"),
+    []
+  );
 });

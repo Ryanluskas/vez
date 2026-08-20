@@ -2,6 +2,7 @@ import { escrever } from "./ia.js";
 import { checarGatilhos } from "./gatilhos.js";
 import { mascarar, conferir, sobrouMarcador } from "./numeros.js";
 import { semRotulosDeRequisito } from "./requisitos.js";
+import { oQueSumiuDaResposta, afirmouSerTudoSemBase } from "./agente/validar.js";
 import { log } from "./log.js";
 
 /*
@@ -53,12 +54,12 @@ const COMO_ELE_ESCREVE = `COMO VOCÊ ESCREVE:
   contrato dele, não recomece o assunto.
 - Pergunte no máximo UMA coisa por mensagem. Interrogatório afasta.
 - Se o cliente já disse algo, use — não confirme que ele disse.
-- NUNCA escreva lista. Nem com dois-pontos, nem com vírgulas, nem em
-  linhas separadas. Se o manual lista cinco documentos, você pede UM: o
-  primeiro. Os outros você pede depois, quando ele mandar esse.
-  Errado: "Preciso de: documento com foto, comprovante de endereço,
-  contracheque atualizado e agência/conta."
-  Certo:  "Me manda uma foto do seu documento pra começar."
+- Quando VOCÊ está decidindo o que pedir, peça UMA coisa por mensagem.
+  Se o manual lista cinco documentos, peça o primeiro; os outros vêm
+  depois, quando ele mandar esse.
+  Assim: "Me manda uma foto do seu documento pra começar."
+  Isto vale só quando a escolha é sua. Quando o consultor já respondeu o
+  que pedir, a resposta dele sai inteira — ver a instrução do DADO.
 
 Assim é bom:
   "Sim, consigo conferir isso pra você."
@@ -335,6 +336,8 @@ export async function escreverComResposta({
       montarManual(manual) +
       (memoria ? `\n${memoria}\n` : "") +
       `\nO DADO abaixo foi conferido pelo consultor no sistema do banco. Copie os números dele EXATAMENTE como estão escritos. Não arredonde, não recalcule, não acrescente nenhum número novo, não converta formato.\n\n` +
+      `NÃO ENCURTE O DADO. Se ele cita quatro documentos, sua mensagem cita os quatro. Não escolha um "pra começar", não deixe nenhum "pra depois", não resuma. Aqui a regra de pedir uma coisa por vez NÃO vale: quem decidiu o que pedir foi o consultor, e ele já decidiu.\n\n` +
+      `NUNCA afirme que aquilo é tudo — nada de "só isso", "mais nada", "é só". Você não sabe o que o banco exige; quem sabe é o consultor, e ele só disse o que está no DADO.\n\n` +
       `Seu trabalho não é repetir o dado: é entregar a notícia como gente. Chame o cliente pelo nome, diga o que conseguiu, e termine oferecendo o próximo passo.\n\n` +
       `${COMO_ELE_ESCREVE}\n\n${REGRA_DE_OURO}`,
     prompt:
@@ -347,14 +350,44 @@ export async function escreverComResposta({
     temperatura: 0.4,
   });
 
+  /*
+    ==================================================================
+    A IA NÃO PODE ENCURTAR NEM COMPLETAR A SUA RESPOSTA
+
+    O consultor digitou "preciso de: documento com foto, comprovante de
+    endereço, contracheque atualizado e agência/conta" e o que saiu foi
+    "Me manda uma foto do seu documento pra começar." Três documentos
+    sumiram. Na mensagem seguinte a IA ainda afirmou "Sim, só isso" —
+    inventando um requisito que contradizia a própria resposta que
+    recebeu. O cliente respondeu "tenho certeza que o banco não pede só
+    isso" e parou de responder.
+
+    A instrução acima pede pra não fazer isso. Instrução não segura
+    sozinha: já existia uma mandando copiar os números exatos, e ela vale
+    porque existe CONFERÊNCIA depois. Para itens de lista não existia
+    nenhuma, e o modelo descartava em silêncio.
+
+    Reprovando aqui, sai a resposta crua do consultor. Ela é feia —
+    "preciso de: documento com foto, comprovante..." — e é completa e
+    verdadeira. Entre bonita e errada e feia e certa, foi a bonita e
+    errada que fez o cliente desistir.
+    ==================================================================
+  */
+  const sumiu = oQueSumiuDaResposta(texto, respostaDoConsultor);
+  const inventouQueETudo = afirmouSerTudoSemBase(texto, respostaDoConsultor);
+
   // Se a IA falhar aqui, o proprio texto do consultor vira o rascunho.
   // Ele escreveu, ele confere na tela de Rascunhos, ninguem fica esperando.
-  if (!seguro(texto, { permitirNumeros: true })) {
-    const porque = !texto
-      ? "a IA não respondeu"
-      : /n[aã]o[\s_]*sei/i.test(texto)
-        ? "a IA disse que não sabe"
-        : "a IA escreveu curto demais";
+  if (!seguro(texto, { permitirNumeros: true }) || sumiu.length || inventouQueETudo) {
+    const porque = sumiu.length
+      ? `a IA descartou o que você pediu: ${sumiu.join(", ")}`
+      : inventouQueETudo
+        ? 'a IA afirmou "só isso" e você não disse isso'
+        : !texto
+          ? "a IA não respondeu"
+          : /n[aã]o[\s_]*sei/i.test(texto)
+            ? "a IA disse que não sabe"
+            : "a IA escreveu curto demais";
     log.alerta(`Rascunho pela sua resposta crua (${porque}).`);
     return respostaDoConsultor;
   }

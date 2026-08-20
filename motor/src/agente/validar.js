@@ -469,3 +469,95 @@ export function validarAntesDeEnviar(texto, contexto = {}) {
 
   return { ok: true };
 }
+
+/*
+  ============================================================================
+  A IA NÃO PODE ENCURTAR A SUA RESPOSTA
+
+  O caso que criou isto custou um cliente.
+
+  O consultor digitou na Fila, três vezes:
+
+    "preciso de: documento com foto, comprovante de endereço,
+     contracheque atualizado e agência/conta"
+
+  E o que saiu foi:
+
+    "Me manda uma foto do seu documento com foto pra começar."
+    "Sim, só isso. Me manda uma foto do seu documento pra começar."
+    "Me manda uma foto do seu documento pra começar."
+
+  Três dos quatro documentos sumiram. E na segunda o modelo AFIRMOU que
+  aquilo era tudo — uma alegação que ele inventou, contradizendo a própria
+  resposta que recebeu. O cliente respondeu "tenho certeza que o banco não
+  pede só isso", e tinha razão.
+
+  A causa foi uma instrução de estilo ("nunca escreva lista, peça um
+  documento por vez") vazando pro caminho onde a resposta do consultor é a
+  fonte da verdade. Pedir um por vez é bom quando o AGENTE decide o que
+  pedir. Quando o consultor já respondeu, a resposta dele sai inteira.
+
+  Para número existia conferência de procedência. Para uma lista de
+  documentos não existia nada — o modelo podia descartar itens em silêncio,
+  e descartou.
+
+  ISTO CONTA ITENS, NÃO PALAVRAS
+
+  Compara quantas coisas distintas a resposta do consultor enumera com
+  quantas sobreviveram no texto da IA. Sumiu alguma, o texto é recusado e
+  sai a resposta crua do consultor — feia, mas completa e verdadeira.
+  ============================================================================
+*/
+
+/* Os nomes de documento que a operação usa, mais os separadores de lista. */
+const COISAS_QUE_SE_PEDE =
+  /\b(documento com foto|documenta[çc][ãa]o com foto|documento|documenta[çc][ãa]o|comprovante de endere[çc]o|comprovante|contracheque|holerite|extrato de margem|margem|ag[êe]ncia|conta|rg|cpf|cnh|selfie|carteira)\b/gi;
+
+function coisasCitadas(texto) {
+  const achadas = new Set();
+  for (const m of String(texto ?? "").matchAll(COISAS_QUE_SE_PEDE)) {
+    /*
+      "documento com foto" e "documento" são a mesma coisa citada de dois
+      jeitos; conto uma. O que importa é quantas COISAS DIFERENTES foram
+      pedidas, não quantas palavras casaram.
+    */
+    const chave = m[0]
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .replace(/^(documento|documentacao)(\s+com\s+foto)?$/, "documento")
+      .replace(/^comprovante(\s+de\s+endereco)?$/, "comprovante")
+      .replace(/^(holerite)$/, "contracheque")
+      .replace(/^(extrato de margem)$/, "margem");
+    achadas.add(chave);
+  }
+  return achadas;
+}
+
+/*
+  A IA descartou alguma coisa que o consultor pediu?
+
+  Devolve a lista do que sumiu (vazia = pode enviar).
+*/
+export function oQueSumiuDaResposta(textoDaIA, respostaDoConsultor) {
+  const pedidas = coisasCitadas(respostaDoConsultor);
+  if (pedidas.size < 2) return [];
+
+  const entregues = coisasCitadas(textoDaIA);
+  return [...pedidas].filter((c) => !entregues.has(c));
+}
+
+/*
+  A IA afirmou que aquilo era tudo, sem o consultor ter dito isso?
+
+  "Sim, só isso" é uma alegação sobre o que o banco exige. Ela só pode sair
+  se o consultor tiver dito algo equivalente — senão é o modelo decidindo
+  sozinho um requisito de negócio.
+*/
+const AFIRMOU_QUE_E_TUDO =
+  /\b(?:sim,?\s*)?(?:[ée]\s+)?(?:s[óo]|somente|apenas)\s+(?:isso|isto|esse|este|estes|isso mesmo)\b|\bs[óo]\s+precis\w+\s+(?:disso|desse)\b|\bmais\s+nada\b/i;
+
+export function afirmouSerTudoSemBase(textoDaIA, respostaDoConsultor) {
+  if (!AFIRMOU_QUE_E_TUDO.test(String(textoDaIA ?? ""))) return false;
+  return !AFIRMOU_QUE_E_TUDO.test(String(respostaDoConsultor ?? ""));
+}

@@ -1,5 +1,6 @@
 import { tentar } from "./resiliencia.js";
 import { EVENTOS, observadorMudo } from "./observar.js";
+import * as respostas from "./respostas.js";
 import { log } from "./log.js";
 
 /*
@@ -294,11 +295,79 @@ export function criarEscuta({ supabase, fluxo, maestro, userId, observador = obs
     });
   }
 
+  /* ---------- 3. voce demorou? entao avisa o cliente ---------- */
+
+  /*
+    ==================================================================
+    O AVISO SÓ EXISTE SE A ESPERA FOR LONGA
+
+    O aviso "vou confirmar e já te retorno" saía junto com a ida pra
+    Fila, sempre. Numa conversa real virou isto, três vezes:
+
+      23:32  bot   Vou confirmar isso certinho e já te retorno.
+      23:32  bot   Me manda uma foto do seu documento...
+
+    Quinze segundos entre as duas. O consultor tinha respondido a Fila
+    em catorze — e o cliente viu o bot anunciar que ia verificar e
+    responder logo depois. Ninguém faz isso. Quem responde em quinze
+    segundos só responde.
+
+    Medido nas quatro últimas: 13s, 14s, 22s, 48s. Com um minuto de
+    tolerância, três delas nunca precisariam do aviso.
+
+    O aviso continua garantindo que ninguém fica no vácuo. Só que agora
+    ele é o que sempre deveria ter sido: um pedido de desculpa pela
+    demora, e não um anúncio antes de qualquer demora existir.
+    ==================================================================
+  */
+  const DEMORA_QUE_MERECE_AVISO = 60_000;
+
+  async function varrerPendenciasDemoradas() {
+    const limite = new Date(Date.now() - DEMORA_QUE_MERECE_AVISO).toISOString();
+
+    const { data, error } = await supabase
+      .from("pendencias")
+      .select("id, id_conversa, criado_em")
+      .eq("status", "aberta")
+      .lt("criado_em", limite)
+      .order("criado_em", { ascending: true })
+      .limit(20);
+
+    if (error || !data?.length) return;
+
+    for (const pendencia of data) {
+      /*
+        Já avisei nesta conversa depois que a pendência abriu? Então não
+        aviso de novo.
+
+        Reconheço pelo TEXTO, não por um campo: a coluna `id_pendencia`
+        do rascunho é o que marca "esta pendência já virou resposta", e
+        preenchê-la com um aviso faria a varredura das respondidas achar
+        que o caso já foi entregue. O aviso ia matar a resposta.
+      */
+      const { data: recentes } = await supabase
+        .from("rascunhos")
+        .select("texto_sugerido")
+        .eq("id_conversa", pendencia.id_conversa)
+        .gte("criado_em", pendencia.criado_em)
+        .limit(20);
+
+      const jaAvisei = (recentes ?? []).some((r) =>
+        respostas.ehAvisoDeQueVaiVerificar(r.texto_sugerido)
+      );
+
+      if (jaAvisei) continue;
+
+      await fluxo.avisarSeVoceDemorou({ idConversa: pendencia.id_conversa });
+    }
+  }
+
   /* ---------- ligar ---------- */
 
   async function varrerTudo() {
     try {
       await varrerPendenciasRespondidas();
+      await varrerPendenciasDemoradas();
       await varrerRascunhosAprovados();
     } catch (erro) {
       log.erro(`varredura: ${erro.message}`);

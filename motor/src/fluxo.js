@@ -635,15 +635,54 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
     });
 
     /*
-      Avisa só quando a pendência é NOVA. Pendência duplicada significa
-      que ele já foi avisado — repetir "já te respondo" a cada mensagem
-      é pior que não dizer nada.
+      ==================================================================
+      O AVISO NÃO SAI NA HORA. SAI SE VOCÊ DEMORAR.
+
+      Saía junto com a ida pra Fila, sempre. Numa conversa real isso
+      virou isto, três vezes seguidas:
+
+        23:32  bot     Vou confirmar isso certinho e já te retorno.
+        23:32  bot     Me manda uma foto do seu documento...
+
+      Duas mensagens do bot, com quinze segundos entre elas. Você tinha
+      respondido a Fila em 14 segundos — e o cliente viu alguém anunciar
+      que ia verificar e responder logo em seguida. Ninguém faz isso.
+      Quem responde em quinze segundos só responde.
+
+      O aviso existe pra um problema real: o cliente esperando em
+      silêncio. Mas isso só é problema quando a espera é longa. Agora ele
+      fica com a varredura da escuta, que o manda depois de
+      `DEMORA_QUE_MERECE_AVISO` — e se você responder antes, o cliente
+      recebe só a resposta.
+
+      A pendência continua sendo criada na hora. O que mudou é quando o
+      cliente ouve falar dela.
+      ==================================================================
     */
     if (avisar && chamada.ok && chamada.dados?.id) {
-      await avisarQueVaiVerificar({ conversa, nomeCliente, lembrado });
+      log.info("   na Fila. Aviso o cliente se você demorar.");
     }
 
     return chamada;
+  }
+
+  /*
+    Você demorou nesta pendência? Então avisa o cliente — uma vez só.
+
+    Chamada pela escuta, não pelo fluxo: quem sabe que o tempo passou é
+    quem varre, não quem atendeu a mensagem.
+  */
+  async function avisarSeVoceDemorou({ idConversa }) {
+    const { data: conversa } = await supabase
+      .from("conversas")
+      .select("id, nome")
+      .eq("id", idConversa)
+      .maybeSingle();
+
+    if (!conversa) return false;
+
+    const lembrado = await memoria.ler(idConversa);
+    return await avisarQueVaiVerificar({ conversa, nomeCliente: conversa.nome, lembrado });
   }
 
   /*
@@ -1814,6 +1853,7 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
       else log.info(`Aprendi mais um jeito seu de responder "${categoria}".`);
     },
 
+    avisarSeVoceDemorou,
     contextoDaConversa,
     mudarEstagio,
   };
