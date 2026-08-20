@@ -19,6 +19,7 @@ import {
   conferido,
   vouVerificar,
   meAdiantei,
+  ehAvisoDeQueVaiVerificar,
   jaTeFalei,
   ehConfirmacaoDeQueJaFalei,
 } from "../src/respostas.js";
@@ -654,4 +655,38 @@ test("'quanto dá?' trava: o verbo dar também é pergunta de dinheiro", () => {
   ]) {
     assert.equal(checarGatilhos(f).travou, false, `travou sem motivo: "${f}"`);
   }
+});
+
+test("o aviso de handoff nunca sai igual duas vezes seguidas", () => {
+  /*
+    Conversa real: o cliente recebeu "Vou dar uma olhada e te respondo em
+    seguida." às 22:22, 22:23 e 22:25 — idêntico — e respondeu "Mas você
+    só fala isso?".
+
+    A causa era `Date.now()` como semente: `% 3` colide sempre que o
+    intervalo é múltiplo de 3ms, e um minuto é. E mesmo com sorteio
+    perfeito, uma em cada três repetiria.
+  */
+  const avisos = [0, 1, 2].map((n) => vouVerificar("Ryan", n));
+
+  assert.equal(new Set(avisos).size, 3, "dois avisos saíram iguais");
+
+  for (const a of avisos) {
+    assert.ok(a.length <= 90, `${a.length} caracteres: "${a}"`);
+    assert.equal(numerosDeRisco(a).length, 0);
+    assert.equal(conferido(a), a, "o próprio guarda recusaria");
+    assert.match(a, /confirmar|conferir|confirmando/i);
+    assert.equal(ehAvisoDeQueVaiVerificar(a), true, "não se reconhece pra contar");
+  }
+
+  // O terceiro reconhece a espera em vez de fingir que é a primeira vez.
+  assert.match(avisos[2], /ainda/i);
+
+  /*
+    Depois do terceiro, nenhum. Não é o cliente no vácuo: ele já foi
+    avisado três vezes e o caso está na Fila. Um quarto aviso idêntico
+    não informa nada — só prova que ninguém está lendo.
+  */
+  assert.equal(vouVerificar("Ryan", 3), null);
+  assert.equal(vouVerificar("Ryan", 10), null);
 });

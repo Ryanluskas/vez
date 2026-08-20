@@ -179,14 +179,41 @@ export function pedirOQueFalta(pedido, nomeCliente) {
   diz "vai dar certo". Só diz que a mensagem chegou e que alguém vai
   responder — que é exatamente o que é verdade.
 */
+/*
+  A ordem é FIXA e o índice é a CONTAGEM, não sorteio.
+
+  Achado numa conversa real: o cliente recebeu "Vou dar uma olhada e te
+  respondo em seguida." três vezes — 22:22, 22:23, 22:25 — e respondeu
+  "Mas você só fala isso?". Ele estava certo.
+
+  A causa era `umaDelas(lista, Date.now())`. Duas coisas erradas nisso.
+  A pequena: `Date.now() % 3` colide sempre que o intervalo é múltiplo
+  de 3ms, e um minuto (60000ms) é. A grande: mesmo com sorteio perfeito,
+  uma em cada três repetiria — sorteio não garante variação, garante que
+  às vezes varia.
+
+  A contagem garante. E a terceira frase reconhece a espera em vez de
+  fingir que é a primeira vez, porque na terceira já não é.
+
+  Devolve null quando acabam. Isso NÃO é o cliente ficando no vácuo: ele
+  já foi avisado três vezes e o caso já está na Fila. Um quarto aviso
+  idêntico não informa nada — só prova que não tem ninguém lendo.
+*/
 const VOU_VERIFICAR = [
   "Vou confirmar isso certinho e já te retorno.",
   "Deixa eu conferir aqui e já te falo.",
-  "Vou dar uma olhada e te respondo em seguida.",
+  "Ainda estou confirmando isso, assim que eu tiver te falo.",
 ];
 
-export function vouVerificar(nomeCliente, semente) {
-  return comNome(nomeCliente, umaDelas(VOU_VERIFICAR, semente));
+export function vouVerificar(nomeCliente, quantosAvisosJaMandei = 0) {
+  const frase = VOU_VERIFICAR[quantosAvisosJaMandei];
+  return frase ? comNome(nomeCliente, frase) : null;
+}
+
+/* Este texto é um dos meus avisos? Serve pra contar quantos já saíram. */
+export function ehAvisoDeQueVaiVerificar(texto) {
+  const t = String(texto ?? "").toLowerCase();
+  return VOU_VERIFICAR.some((frase) => t.includes(frase.toLowerCase()));
 }
 
 /* ------------------------------------------------------------------

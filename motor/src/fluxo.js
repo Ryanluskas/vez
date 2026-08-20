@@ -557,11 +557,33 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
     ouvir de novo a cada mensagem que manda.
   */
   async function avisarQueVaiVerificar({ conversa, nomeCliente, lembrado }) {
+    /*
+      Quantos avisos já saíram nesta conversa. `vouVerificar` usa isso
+      como índice, então o segundo aviso nunca é igual ao primeiro — e
+      depois do terceiro ele devolve null e nenhum aviso sai.
+
+      Isto veio de conversa real: três "vou dar uma olhada" idênticos, e
+      o cliente respondendo "mas você só fala isso?".
+    */
+    const { data: anteriores } = await supabase
+      .from("rascunhos")
+      .select("texto_sugerido")
+      .eq("id_conversa", conversa.id)
+      .order("criado_em", { ascending: false })
+      .limit(10);
+
+    const jaAvisei = (anteriores ?? []).filter((r) =>
+      respostas.ehAvisoDeQueVaiVerificar(r.texto_sugerido)
+    ).length;
+
     const texto = respostas.conferido(
-      respostas.vouVerificar(lembrado?.nome ?? nomeCliente, Date.now())
+      respostas.vouVerificar(lembrado?.nome ?? nomeCliente, jaAvisei)
     );
 
-    if (!texto) return false;
+    if (!texto) {
+      log.info("   já avisei o suficiente; o caso está na Fila, não repito.");
+      return false;
+    }
 
     const { error } = await supabase.from("rascunhos").insert({
       user_id: userId,
@@ -1671,6 +1693,36 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
         .eq("status", "aprovado")
         .is("enviado_em", null);
 
+      /*
+        ================================================================
+        GRAVA PRIMEIRO, ESCREVE DEPOIS
+
+        Sem isto, dez minutos depois o cliente escreve "aquele valor" e o
+        bot não tem ideia de qual. Ele já respondeu essa pergunta — e não
+        lembra que respondeu.
+
+        E a ordem importa. Isto ficava DEPOIS de o redator escrever a
+        mensagem, e aí um modelo lento segurava a gravação junto: durante
+        dezenas de segundos o número existia na sua resposta e não existia
+        no estado. Cliente que escrevesse "aquele valor" nessa janela
+        ouvia "deixa eu confirmar" — sobre um número que já estava ali.
+
+        O que você digitou é fato no instante em que você digita. Como o
+        bot vai redigir é outro assunto, e pode falhar sem levar o fato
+        junto.
+
+        Procedência 'consultor', gravada junto. É o que permite ao
+        validador aceitar esse número depois: ele confere contra esta
+        fonte, e recusa qualquer outro.
+        ================================================================
+      */
+      if (numerosDeRisco(pendencia.resposta ?? "").length) {
+        await memoria.guardarSimulacao(pendencia.id_conversa, {
+          valor: pendencia.resposta,
+          de: "consultor",
+        });
+      }
+
       const texto = await escreverComResposta({
         mensagemCliente: pendencia.pergunta,
         respostaDoConsultor: pendencia.resposta,
@@ -1717,26 +1769,6 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
         idPendencia: pendencia.id,
         origem: "consultor",
       });
-
-      /*
-        ================================================================
-        GRAVA O QUE VOCÊ ACABOU DE DIZER AO CLIENTE
-
-        Sem isto, dez minutos depois o cliente escreve "aquele valor" e o
-        bot não tem ideia de qual. Ele já respondeu essa pergunta — e não
-        lembra que respondeu.
-
-        Procedência 'consultor', gravada junto. É o que permite ao
-        validador aceitar esse número depois: ele confere contra esta
-        fonte, e recusa qualquer outro.
-      */
-      const numeros = numerosDeRisco(pendencia.resposta ?? "");
-      if (numeros.length) {
-        await memoria.guardarSimulacao(pendencia.id_conversa, {
-          valor: pendencia.resposta,
-          de: "consultor",
-        });
-      }
 
       observador.registrar(EVENTOS.CONSULTOR, {
         idConversa: pendencia.id_conversa,

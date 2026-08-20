@@ -4,6 +4,7 @@ import { criarFluxo } from "../fluxo.js";
 import { criarEscuta } from "../escuta.js";
 import { montarAbordagem } from "../abordagem.js";
 import { numerosDeRisco } from "../numeros.js";
+import { modoParaRestaurar, esquecerAnotacao } from "./modo-guardado.js";
 
 /*
   ============================================================================
@@ -134,7 +135,12 @@ try {
     .select("modo, categorias")
     .eq("user_id", userId)
     .maybeSingle();
-  prefsOriginais = prefs ?? { modo: "manual", categorias: [] };
+  /*
+    A anotação em disco ganha do banco. Sem isto, o ademar rodando depois
+    de um conversa.js morto "restaura" o autônomo que o outro deixou —
+    e a conta do consultor fica autônoma por causa de um teste.
+  */
+  prefsOriginais = modoParaRestaurar(prefs);
 
   await supabase.from("preferencias").upsert(
     {
@@ -350,12 +356,48 @@ try {
   resultados.push({ nome: `PAROU: ${erro.message}`, ok: false });
 } finally {
   desligar?.();
+
+  /*
+    ==================================================================
+    O TESTE NÃO PODE ENSINAR O BOT A FALAR
+
+    Isto faltava, e o estrago foi real: a conta acumulou 15 cópias de
+    "Ademar, consegui 4200 em 12x de 380. Quer que eu te mande a
+    simulação completa?" em `respostas_boas` — a gaveta do "Meu jeito".
+
+    4200 é um valor de fixture. Ademar é um cliente que não existe. E
+    tudo isso entrava no prompt como exemplo do jeito do consultor
+    falar, com peso MAIOR que os exemplos de fábrica.
+
+    O teste rodou dezenas de vezes. Cada rodada ensinava a mesma frase
+    de novo, e o bot ficava mais convicto de que é assim que se fala.
+    ==================================================================
+  */
+  const { data: aprendidoNoTeste } = await supabase
+    .from("respostas_boas")
+    .select("id")
+    .or(
+      "mensagem_cliente.eq.Preciso saber se ainda libera pra mim," +
+        "mensagem_cliente.eq.Aquele valor," +
+        "mensagem_cliente.eq.Você já me disse o valor," +
+        "mensagem_cliente.ilike.%Você nem pediu isso%"
+    );
+
+  for (const e of aprendidoNoTeste ?? []) {
+    await supabase.from("respostas_boas").delete().eq("id", e.id);
+  }
+  if (aprendidoNoTeste?.length) {
+    console.log(`  ✓ ${aprendidoNoTeste.length} exemplo(s) de estilo do teste removido(s)`);
+  }
+
   if (idConversa) await supabase.from("conversas").delete().eq("id", idConversa);
   if (prefsOriginais) {
     await supabase
       .from("preferencias")
       .update({ modo: prefsOriginais.modo, categorias: prefsOriginais.categorias })
       .eq("user_id", userId);
+    // Devolveu de verdade: a anotação já não descreve nada e some.
+    esquecerAnotacao();
   }
   console.log(`\nlimpo · modo devolvido para "${prefsOriginais?.modo}"`);
 }

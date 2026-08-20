@@ -1,4 +1,3 @@
-import fsSync from "node:fs";
 import { lerAmbiente } from "../ambiente.js";
 import { criarClienteDoMotor, entrarNaConta } from "../supabase.js";
 import { criarFluxo } from "../fluxo.js";
@@ -8,6 +7,7 @@ import { disjuntores } from "../resiliencia.js";
 import { ondeCadaCoisaRoda } from "../ia.js";
 import { validarAntesDeEnviar } from "../agente/validar.js";
 import { numerosDeRisco } from "../numeros.js";
+import { modoParaRestaurar, esquecerAnotacao } from "./modo-guardado.js";
 
 /*
   ============================================================================
@@ -108,44 +108,6 @@ const paraLimpar = { conversas: [], conhecimento: [], conexao: null };
 let modoOriginal = null;
 let desligarEscuta = null;
 
-/*
-  ============================================================================
-  O MODO ORIGINAL SOBREVIVE A UM KILL
-
-  Este teste troca o modo do agente para 'autonomo' e devolve no fim. O
-  `finally` cobre erro e saída normal — não cobre o processo sendo morto.
-
-  E foi morto: interrompi uma rodada no meio, o modo ficou 'autonomo', e a
-  rodada seguinte leu esse valor como se fosse o original. Duas execuções e
-  a conta do consultor ficaria em modo autônomo permanentemente, por causa
-  de um teste.
-
-  A anotação em arquivo resolve: se ela existe quando o teste começa, é
-  porque a rodada anterior não terminou, e o valor certo está nela.
-  ============================================================================
-*/
-const ANOTACAO = new URL("./_modo-original.json", import.meta.url);
-
-function guardarModoOriginal(prefs) {
-  fsSync.writeFileSync(ANOTACAO, JSON.stringify(prefs));
-}
-
-function modoAnotado() {
-  try {
-    return JSON.parse(fsSync.readFileSync(ANOTACAO, "utf8"));
-  } catch {
-    return null;
-  }
-}
-
-function esquecerAnotacao() {
-  try {
-    fsSync.rmSync(ANOTACAO, { force: true });
-  } catch {
-    /* sem a anotação o fallback é o que já está no banco */
-  }
-}
-
 async function limparTudo() {
   titulo("Limpeza");
 
@@ -156,6 +118,8 @@ async function limparTudo() {
       .from("preferencias")
       .update({ modo: modoOriginal.modo, categorias: modoOriginal.categorias })
       .eq("user_id", userId);
+    // Devolveu de verdade: a anotação já não descreve nada e some.
+    esquecerAnotacao();
     console.log(`  ✓ modo devolvido para "${modoOriginal.modo}"`);
   }
 
@@ -199,8 +163,20 @@ async function limparTudo() {
   Imita exatamente o que whatsapp.js faz quando chega mensagem: grava, e
   se for do cliente, aciona o cérebro.
 */
+/*
+  Quantos envios existiam antes da mensagem atual do cliente.
+
+  Fica aqui em cima porque `clienteDiz` escreve nela e `esperarEnvio` lê —
+  e `let` não é içado: declarada lá embaixo, o primeiro uso caía na zona
+  morta e o teste parava com "marcaDoEnvio is not defined".
+*/
+let marcaDoEnvio = 0;
+
 async function clienteDiz(telefone, texto, { idMensagem = null } = {}) {
   console.log(`\n  \x1b[33m← ${telefone}:\x1b[0m ${texto}`);
+
+  // Quantos envios existiam ANTES desta mensagem. `esperarEnvio` conta daqui.
+  marcaDoEnvio = gravador.enviadas.length;
 
   const conversa = await fluxo.registrar({
     idConexao: paraLimpar.conexao ?? conexaoId,
@@ -335,8 +311,7 @@ try {
     A anotacao ganha do banco: se ela existe, a rodada anterior morreu no
     meio e o que esta no banco agora e o valor do TESTE, nao o seu.
   */
-  modoOriginal = modoAnotado() ?? prefs ?? { modo: "manual", categorias: [] };
-  guardarModoOriginal(modoOriginal);
+  modoOriginal = modoParaRestaurar(prefs);
   console.log(`  ! modo original: "${modoOriginal.modo}" · categorias: ${JSON.stringify(modoOriginal.categorias)}`);
   console.log("    (se este processo morrer, restaure isso na mão em Conta)");
 

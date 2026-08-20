@@ -34,16 +34,51 @@ export function criarEscuta({ supabase, fluxo, maestro, userId, observador = obs
 
   /* ---------- 1. pendencias respondidas -> rascunho ---------- */
 
+  /*
+    ==================================================================
+    A FILA PARAVA DE FUNCIONAR NA DÉCIMA RESPOSTA
+
+    Bug encontrado numa conversa real, e ele mata o produto em silêncio.
+
+    Esta varredura pegava as 10 pendências respondidas MAIS ANTIGAS e
+    pulava as que já tinham virado rascunho. Só que "já virou rascunho"
+    não mudava nada no banco: a linha continuava 'respondida' para
+    sempre, e continuava ocupando a janela das 10 mais antigas.
+
+    Ou seja: assim que o consultor acumulava 10 respostas dadas na Fila,
+    a janela ficava cheia de trabalho JÁ FEITO e nenhuma resposta nova
+    chegava ao cliente. Nunca mais. Sem erro no log e sem alerta — ele
+    responde no painel, o painel mostra tudo certo, e o cliente não
+    recebe nada.
+
+    Duas mudanças:
+
+      MAIS NOVA PRIMEIRO. A resposta que o consultor acabou de dar é a
+      que o cliente está esperando agora. Antiga que não processou já
+      perdeu a hora; nova que não processa é cliente no vácuo.
+
+      JANELA MAIOR. 10 era pequeno demais pra absorver o histórico. Com
+      60 e a ordem invertida, precisaria de 60 respostas presas ao mesmo
+      tempo pra travar de novo.
+
+    O conserto definitivo é a pendência saber que terminou — um estado
+    'concluida' em vez de ficar 'respondida' pra sempre. Está escrito em
+    banco/21_pendencia_concluida.sql e espera aprovação, porque mexe no
+    esquema do banco de produção.
+    ==================================================================
+  */
   async function varrerPendenciasRespondidas() {
     const { data, error } = await supabase
       .from("pendencias")
       .select("id, id_conversa, pergunta, resposta, categoria")
       .eq("status", "respondida")
       .not("resposta", "is", null)
-      .order("respondida_em", { ascending: true })
-      .limit(10);
+      .order("respondida_em", { ascending: false })
+      .limit(60);
 
     if (error || !data?.length) return;
+
+    let feitas = 0;
 
     for (const pendencia of data) {
       // Ja virou rascunho? Entao essa ja foi tratada.
@@ -57,6 +92,9 @@ export function criarEscuta({ supabase, fluxo, maestro, userId, observador = obs
       await comTrava(pendencia.id, () =>
         fluxo.transformarRespostaEmRascunho(pendencia)
       );
+
+      // Nao segura a varredura inteira num lote grande de atrasadas.
+      if (++feitas >= 10) return;
     }
   }
 
@@ -65,7 +103,7 @@ export function criarEscuta({ supabase, fluxo, maestro, userId, observador = obs
   async function varrerRascunhosAprovados() {
     const { data, error } = await supabase
       .from("rascunhos")
-      .select("id, id_conversa, id_pendencia, texto_sugerido, categoria, automatico")
+      .select("id, id_conversa, id_pendencia, texto_sugerido, categoria, automatico, origem")
       .eq("status", "aprovado")
       .is("enviado_em", null)
       .order("criado_em", { ascending: true })
@@ -189,12 +227,42 @@ export function criarEscuta({ supabase, fluxo, maestro, userId, observador = obs
     }
 
     /*
-      So vira exemplo o que realmente saiu E passou pelos seus olhos.
-      Mensagem automatica nao ensina: aprender com texto que ninguem
-      conferiu compoe erro em cima de erro, e a cada rodada o bot ficaria
-      mais parecido com a propria versao ruim de si mesmo.
+      ==================================================================
+      SO VIRA EXEMPLO O QUE PASSOU PELOS SEUS OLHOS
+
+      E "seus olhos" quer dizer o TEXTO, nao o dado.
+
+      Aqui morava a raiz da linguagem robotica, e ela e um ciclo fechado.
+      Quando voce responde na Fila, o rascunho nasce com origem
+      'consultor' e sai sem segunda aprovacao — correto, voce ja aprovou
+      o dado quando digitou. Mas a FRASE que vai pro cliente quem
+      escreveu foi o modelo:
+
+        voce digitou:  "1600"
+        saiu:          "Consegui liberar 1600. Quer que eu te mande a
+                        simulacao completa?"
+
+      Voce nunca viu essa frase. E ela era gravada em `respostas_boas`
+      como "o jeito do Ryan de responder valor" — e volta no proximo
+      prompt como exemplo a imitar, com peso maior que os exemplos de
+      fabrica.
+
+      Medido na conta real: 15 copias de uma frase que o modelo inventou
+      num teste, mais as frases do print, todas etiquetadas como estilo
+      do consultor. O bot estava aprendendo a ser robo consigo mesmo, e
+      a cada rodada ficava mais convicto.
+
+      Aprende so o que ele leu de verdade:
+
+        origem 'bot' aprovado no painel   ele leu e clicou. Aprende.
+        origem 'lista' aprovado           idem. Aprende.
+        origem 'consultor'                ele aprovou o NUMERO, nao a
+                                          frase. NAO aprende.
+        automatico                        ninguem leu. NAO aprende.
+      ==================================================================
     */
-    if (!rascunho.automatico) await guardarExemplo(rascunho, conversa);
+    const eleLeuOTexto = !rascunho.automatico && rascunho.origem !== "consultor";
+    if (eleLeuOTexto) await guardarExemplo(rascunho, conversa);
   }
 
   async function guardarExemplo(rascunho, conversa) {

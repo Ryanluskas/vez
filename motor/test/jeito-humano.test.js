@@ -15,6 +15,7 @@ import { primeiroNome, montarAbordagem } from "../src/abordagem.js";
 import { checarGatilhos } from "../src/gatilhos.js";
 import { numerosDeRisco } from "../src/numeros.js";
 import { textoMalformado } from "../src/agente/validar.js";
+import { ESTILO_BASE } from "../src/estilo.js";
 
 /*
   ============================================================================
@@ -277,4 +278,112 @@ test("entradas estranhas não quebram as frases novas", () => {
     assert.doesNotThrow(() => vouVerificar(entrada, 0));
     assert.doesNotThrow(() => saudacao(entrada, entrada, 0));
   }
+});
+
+/* ================================================================
+   Os exemplos de estilo SÃO a voz do bot
+   ================================================================ */
+
+/*
+  Descoberto numa conversa real. O prompt do redator manda escrever curto e
+  sem formulário; os exemplos de fábrica faziam o contrário, e o cliente
+  recebeu isto:
+
+    "Preciso de: documento com foto, comprovante de endereço, contracheque
+     atualizado e agência/conta."
+
+  Que é o exemplo de `documentos` — quatro itens em quatro linhas —
+  achatado numa linha. Veio duas vezes, e o cliente respondeu "mas você só
+  fala isso?".
+
+  Few-shot ganha de instrução. O modelo lê a regra e lê o exemplo; o
+  exemplo é concreto, a regra é abstrata, e ele copia o exemplo. Então o
+  exemplo tem que passar na mesma régua que a frase do bot.
+*/
+const TODOS_OS_EXEMPLOS = Object.entries(ESTILO_BASE).flatMap(([categoria, exs]) =>
+  exs.map((e) => ({ categoria, texto: e.resposta_ryan }))
+);
+
+test("nenhum exemplo de estilo passa de duas frases", () => {
+  for (const { categoria, texto } of TODOS_OS_EXEMPLOS) {
+    const frases = texto.split(/[.!?\n]+/).filter((s) => s.trim().length > 2);
+    assert.ok(
+      frases.length <= 2,
+      `[${categoria}] ${frases.length} frases — o modelo vai copiar: "${texto}"`
+    );
+    assert.ok(texto.length <= 110, `[${categoria}] ${texto.length} caracteres: "${texto}"`);
+  }
+});
+
+test("nenhum exemplo de estilo é formulário", () => {
+  for (const { categoria, texto } of TODOS_OS_EXEMPLOS) {
+    assert.equal(/\n/.test(texto), false, `[${categoria}] lista em várias linhas: "${texto}"`);
+    assert.equal(
+      /:\s*\S+,\s*\S+/.test(texto),
+      false,
+      `[${categoria}] dois-pontos abrindo enumeração: "${texto}"`
+    );
+    // No máximo uma pergunta: interrogatório afasta.
+    const perguntas = (texto.match(/\?/g) ?? []).length;
+    assert.ok(perguntas <= 1, `[${categoria}] ${perguntas} perguntas: "${texto}"`);
+  }
+});
+
+test("nenhum exemplo de estilo tem cara de robô", () => {
+  for (const { categoria, texto } of TODOS_OS_EXEMPLOS) {
+    for (const padrao of CARA_DE_ROBO) {
+      assert.equal(padrao.test(texto), false, `[${categoria}] "${texto}" casou com ${padrao}`);
+    }
+    assert.equal(
+      /(?:estou|fico|ficamos)\s+[àa]\s+disposi[çc][ãa]o/i.test(texto),
+      false,
+      `[${categoria}] "fico à disposição" é a mesma frase de robô: "${texto}"`
+    );
+  }
+});
+
+test("nenhum exemplo de estilo fura a regra de ouro", () => {
+  /*
+    Um exemplo que diz "vou rodar uma simulação" ensina o bot a dizer que
+    ELE fez a conta. Quem faz é o sistema do banco — e o cliente que
+    acredita no contrário dirige a próxima pergunta a quem não sabe
+    responder.
+  */
+  for (const { categoria, texto } of TODOS_OS_EXEMPLOS) {
+    assert.equal(
+      /\b(?:rodar|rodei|fazer|fiz|refazer|calcular|calculei|simulei)\s+(?:uma?\s+|o\s+|a\s+)?(?:simula|c[áa]lculo|conta)/i.test(
+        texto
+      ),
+      false,
+      `[${categoria}] reivindicou a simulação: "${texto}"`
+    );
+  }
+});
+
+test("nenhum exemplo de estilo tem nome de pessoa fixo", () => {
+  /*
+    Tinha um "Tranquilo, Josenete" aqui. O modelo copia o exemplo inteiro,
+    e "Josenete" ia parar numa mensagem pra outra pessoa.
+  */
+  for (const { categoria, texto } of TODOS_OS_EXEMPLOS) {
+    /*
+      Exige a VÍRGULA do vocativo. A primeira versão aceitava "!" também e
+      acusou "Oi! Tudo ótimo" de ter uma pessoa chamada Tudo — o mesmo
+      falso positivo que o validador já teve com "Tudo bem?".
+    */
+    const vocativo = texto.match(/,\s+([A-ZÀ-Ý][a-zà-ÿ]{3,})/);
+    assert.equal(vocativo, null, `[${categoria}] nome fixo "${vocativo?.[1]}": "${texto}"`);
+  }
+});
+
+test("o exemplo de documentos pede UMA coisa, igual ao código", () => {
+  /*
+    Não adianta `MAXIMO_POR_MENSAGEM = 1` em requisitos.js se o exemplo
+    pede quatro documentos: o modelo copia o exemplo.
+  */
+  const pedido = ESTILO_BASE.documentos[0].resposta_ryan;
+  const rotulos = ["documento", "comprovante", "contracheque", "agência", "conta", "margem"];
+  const quantos = rotulos.filter((r) => new RegExp(r, "i").test(pedido)).length;
+
+  assert.ok(quantos <= 1, `o exemplo pede ${quantos} documentos: "${pedido}"`);
 });
