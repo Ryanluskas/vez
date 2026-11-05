@@ -167,8 +167,9 @@ export async function alternarAtendimento(
 
   if (!id) return { erro: "Conversa não identificada." };
 
+  let usuario;
   try {
-    await exigirLogin();
+    usuario = await exigirLogin();
   } catch (e) {
     return { erro: (e as Error).message };
   }
@@ -178,7 +179,8 @@ export async function alternarAtendimento(
   const { error } = await supabase
     .from("conversas")
     .update({ atender: atenderAgora })
-    .eq("id", id);
+    .eq("id", id)
+    .eq("user_id", usuario.id);
 
   if (error) return { erro: `Não consegui salvar: ${error.message}` };
 
@@ -467,13 +469,11 @@ export async function apagarConexao(
     .eq("id", id)
     .maybeSingle();
 
-  if (cx?.evolution_instancia) {
+  if (cx?.evolution_instancia && process.env.EVOLUTION_API_KEY) {
     try {
       const serverUrl = process.env.EVOLUTION_SERVER_URL || "http://localhost:8080";
-      const apiKey =
-        process.env.EVOLUTION_API_KEY ||
-        "fbd3fd31e1aa735f2c29d050fea8ec3d53777bdb2539fe8fed0f4af4b2cda32c";
-      await fetch(`${serverUrl}/instance/delete/${cx.evolution_instancia}`, {
+      const apiKey = process.env.EVOLUTION_API_KEY;
+      await fetch(`${serverUrl}/instance/delete/${encodeURIComponent(cx.evolution_instancia)}`, {
         method: "DELETE",
         headers: { apikey: apiKey },
       });

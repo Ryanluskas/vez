@@ -161,11 +161,11 @@ test("Multiprovedor IA: quando todos os provedores falham, degrada com seguranç
 test("LGPD: identifica pedido de opt-out e desativação de atendimento", () => {
   const optOut1 = identificarObjecao("Não tenho interesse, favor tirar meu número da lista");
   assert.ok(optOut1);
-  assert.equal(optOut1.tipo, TIPOS_OBJECAO.NAO_TEM_INTERESSE);
+  assert.equal(optOut1.tipo, TIPOS_OBJECAO.OPT_OUT_EXPLICITO);
 
-  const optOut2 = identificarObjecao("Parem de me mandar mensagem, não quero nada");
+  const optOut2 = identificarObjecao("Pare de me mandar mensagem, não quero nada");
   assert.ok(optOut2);
-  assert.equal(optOut2.tipo, TIPOS_OBJECAO.NAO_TEM_INTERESSE);
+  assert.equal(optOut2.tipo, TIPOS_OBJECAO.OPT_OUT_EXPLICITO);
 });
 
 // 5. Follow-ups Supervisionados: Regra Absoluta de Não Envio sem Aprovação

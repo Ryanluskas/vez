@@ -289,11 +289,16 @@ export default async function PaginaVisaoGeral() {
 
             <div className="divide-y divide-fio text-[12px]">
               <div className="py-2.5 flex items-center justify-between">
-                <span className="text-texto2">WhatsApp Evolution v2</span>
-                {metricas.conexoesAtivas > 0 ? (
+                <span className="text-texto2">WhatsApp / Motor Vez</span>
+                {metricas.conexoesAtivas > 0 && metricas.motorLigado ? (
                   <span className="flex items-center gap-1.5 font-medium text-texto">
                     <span className="h-1.5 w-1.5 rounded-full bg-jade" />
-                    Conectado
+                    Conectado · Motor Ativo
+                  </span>
+                ) : metricas.conexoesAtivas > 0 ? (
+                  <span className="flex items-center gap-1.5 font-medium text-amber-500">
+                    <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                    Registrado · Sem Batimento Recente
                   </span>
                 ) : (
                   <span className="flex items-center gap-1.5 font-medium text-erro">

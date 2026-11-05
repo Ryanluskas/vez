@@ -123,6 +123,10 @@ export function criarObservador({ supabase, userId }) {
   function registrar(tipo, dados = {}) {
     const {
       idConversa = null,
+      idMensagem = null,
+      idPendencia = null,
+      idRascunho = null,
+      idOperacao = null,
       ferramenta = null,
       argumentos = null,
       detalhe = null,
@@ -130,12 +134,20 @@ export function criarObservador({ supabase, userId }) {
       ms = null,
     } = dados;
 
+    const argsComCorrelacao = {
+      ...(argumentos && typeof argumentos === "object" ? argumentos : {}),
+      ...(idMensagem ? { id_mensagem: idMensagem } : {}),
+      ...(idPendencia ? { id_pendencia: idPendencia } : {}),
+      ...(idRascunho ? { id_rascunho: idRascunho } : {}),
+      ...(idOperacao ? { id_operacao: idOperacao } : {}),
+    };
+
     fila.push({
       user_id: userId,
       id_conversa: idConversa,
       tipo,
       ferramenta,
-      argumentos: peneirar(argumentos),
+      argumentos: peneirar(argsComCorrelacao),
       // Detalhe é uma frase curta pro consultor ler, nunca um dump.
       detalhe: detalhe ? String(detalhe).slice(0, 300) : null,
       ok,

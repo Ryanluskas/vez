@@ -82,7 +82,7 @@ export function CentralAtendimento({
   const calculoSimulacao = calcularReducaoCapitalCred(valorSimulacaoBruto);
   const primeiroNome = conversaAtiva?.nome ? conversaAtiva.nome.trim().split(/\s+/)[0] : "";
   const propostaCalculada = calculoSimulacao
-    ? `${primeiroNome ? `${primeiroNome}, ` : ""}rodei sua simulação aqui no sistema do Santander. Conseguimos liberar ${calculoSimulacao.clienteFormatado} líquido na sua conta hoje, mantendo sua parcela exatamente igual sem subir um centavo! Ficou bom para você? Quer dar entrada?`
+    ? `${primeiroNome ? `${primeiroNome}, ` : ""}conferi sua simulação aqui no sistema e o valor disponível para liberação é de ${calculoSimulacao.clienteFormatado}. Ficou bom para você? Quer seguir com essa proposta?`
     : "";
 
   function handleEnviarSimulacaoOficial() {

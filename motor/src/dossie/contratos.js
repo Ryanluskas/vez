@@ -15,11 +15,12 @@ import { comoNumero, comoDinheiro } from "../lista.js";
 export function extrairContratos(texto) {
   if (!texto || typeof texto !== "string") return [];
 
-  const contratos = [];
+  const blocosBrutos = [];
   const linhas = texto.split(/\r?\n/);
   const regexContrato = /(?:contrato|n[oº]|proposta)[\s:]*([0-9A-Za-z*.-]{5,20})/i;
-  const regexParcela = /(?:parcela|prestac[aã]o|vlr|valor)[\s:]*(?:r\$\s*)?([\d.,]+)/i;
+  const regexParcela = /(?:parcela|prestac[aã]o|vlr|valor(?!\s*quitac|\s*saldo))[\s:]*(?:r\$\s*)?([\d.,]+)/i;
   const regexTaxa = /(?:taxa|juros)[\s:]*([\d.,]+(?:\s*%\s*(?:a\.?m\.?|ao\s*m[eê]s)?)?)/i;
+  const regexSaldo = /(?:saldo(?:\s*devedor)?|valor\s*quitac[aã]o)[\s:]*(?:r\$\s*)?([\d.,]+)/i;
 
   let bufferAtual = null;
 
@@ -27,7 +28,7 @@ export function extrairContratos(texto) {
     const matchContrato = linha.match(regexContrato);
     if (matchContrato) {
       if (bufferAtual && bufferAtual.numero) {
-        contratos.push(normalizarContrato(bufferAtual));
+        blocosBrutos.push({ ...bufferAtual });
       }
       bufferAtual = {
         numero: matchContrato[1].trim(),
@@ -40,7 +41,12 @@ export function extrairContratos(texto) {
     }
 
     if (bufferAtual) {
-      const matchParcela = linha.match(regexParcela);
+      const matchSaldo = linha.match(regexSaldo);
+      if (matchSaldo && !bufferAtual.saldo) {
+        bufferAtual.saldo = comoNumero(matchSaldo[1]);
+      }
+
+      const matchParcela = !matchSaldo ? linha.match(regexParcela) : null;
       if (matchParcela && !bufferAtual.parcela) {
         bufferAtual.parcela = comoNumero(matchParcela[1]);
       }
@@ -59,20 +65,25 @@ export function extrairContratos(texto) {
   }
 
   if (bufferAtual && bufferAtual.numero) {
-    contratos.push(normalizarContrato(bufferAtual));
+    blocosBrutos.push({ ...bufferAtual });
   }
 
-  // Deduplicação por número de contrato
-  const unicos = [];
-  const vistos = new Set();
-  for (const c of contratos) {
-    if (!vistos.has(c.numero)) {
-      vistos.add(c.numero);
-      unicos.push(c);
+  // Consolidação multi-página por número de contrato (mescla campos extraídos em páginas distintas)
+  const porNumero = new Map();
+  for (const b of blocosBrutos) {
+    const existente = porNumero.get(b.numero);
+    if (!existente) {
+      porNumero.set(b.numero, { ...b });
+    } else {
+      if (!existente.parcela && b.parcela) existente.parcela = b.parcela;
+      if (!existente.taxa && b.taxa) existente.taxa = b.taxa;
+      if (existente.pagas == null && b.pagas != null) existente.pagas = b.pagas;
+      if (!existente.total && b.total) existente.total = b.total;
+      if (!existente.saldo && b.saldo) existente.saldo = b.saldo;
     }
   }
 
-  return unicos;
+  return Array.from(porNumero.values()).map(normalizarContrato);
 }
 
 function normalizarContrato(c) {

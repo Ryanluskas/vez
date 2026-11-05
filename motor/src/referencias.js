@@ -28,12 +28,76 @@
 */
 
 import { valorConfiavel } from "./valores.js";
+import { REQUISITOS, ultimoRequisitoPerguntado } from "./requisitos.js";
 
 function simplificar(texto) {
   return String(texto ?? "")
     .toLowerCase()
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "");
+}
+
+/*
+  Interpreta mensagens curtas dependentes do contexto imediato da conversa:
+  - "Oi?", "E aí?" quando aguardando retorno ou pergunta anterior
+  - "Que?", "Como assim?", "Não entendi" pedindo esclarecimento do que o bot acabou de dizer
+  - "Não", "Não.", "Não vou mandar" recusando um pedido de documento/informação recém-feito
+*/
+export function interpretarMensagemCurtaContextual(mensagem, memoria = null, conversa = {}) {
+  const bruto = String(mensagem ?? "").trim();
+  const limpo = simplificar(bruto).replace(/[.!]+$/g, "").trim();
+  if (!limpo || limpo.length > 65) return null;
+
+  const ultimoReq = ultimoRequisitoPerguntado(memoria);
+  const ultimaPerguntaAgente =
+    memoria?.ultima_pergunta_agente ??
+    memoria?.perguntado?._ultima_pergunta_agente ??
+    (ultimoReq ? REQUISITOS[ultimoReq]?.pedido : null);
+
+  // 1. Pedido de esclarecimento curto ("Que?", "Quê?", "Como assim?", "Não entendi", "Hã?")
+  if (
+    /^(?:o\s*que|que|como\s*assim|nao\s*entendi|ha|ahn|oi\s*\?\s*que|explica\s*melhor)\??$/i.test(limpo)
+  ) {
+    return {
+      tipo: "pedido_esclarecimento",
+      ultimoRequisito: ultimoReq,
+      ultimaPerguntaAgente,
+      simulacao: memoria?.simulacao ?? null,
+    };
+  }
+
+  // 2. "Oi?" curto — cobrança de retorno ou retomada do turno anterior
+  if (/^(?:oi\?+|ola\?+|alguem\s*ai\??|e\s*ai\??|conseguiu\s*ver\??)\s*$/i.test(bruto.toLowerCase())) {
+    return {
+      tipo: "cobranca_ou_oi_contextual",
+      aguardandoConsultor: Boolean(
+        conversa?.temPendenciaAberta ||
+        conversa?.estagio === "aguardando_voce" ||
+        memoria?.aguardando === "consultor"
+      ),
+      ultimoRequisito: ultimoReq,
+      ultimaPerguntaAgente,
+      ultimaPerguntaCliente:
+        memoria?.ultima_pergunta_cliente ?? memoria?.perguntado?._ultima_pergunta_cliente ?? null,
+    };
+  }
+
+  // 3. Recusa curta/contextual ao último requisito solicitado ("Não", "Não vou mandar", "Prefiro não enviar")
+  const ehRecusaCurta =
+    /^(?:nao|n[aã]o|nao\s+quero|nao\s+vou|nao\s+tenho|nao\s+vou\s+mandar|nao\s+quero\s+mandar|prefiro\s+nao(?:\s+mandar|\s+enviar)?|nao\s+mando|nao\s+envio)$/i.test(
+      limpo
+    );
+
+  if (ehRecusaCurta && (ultimoReq || ultimaPerguntaAgente)) {
+    return {
+      tipo: "recusa_contextual",
+      chaveRecusada: ultimoReq || "geral",
+      rotuloRecusado: ultimoReq ? REQUISITOS[ultimoReq]?.rotulo : "documento solicitado",
+      ultimaPerguntaAgente,
+    };
+  }
+
+  return null;
 }
 
 /* ------------------------------------------------------------------

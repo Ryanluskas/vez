@@ -34,6 +34,7 @@
 */
 
 export const FONTES_CONFIAVEIS = ["consultor", "lista", "ferramenta"];
+const VALIDADE_MAXIMA_PADRAO_MS = 7 * 24 * 60 * 60 * 1000; // 7 dias
 
 /*
   Esta procedência autoriza o número a sair?
@@ -46,26 +47,27 @@ export function deFonteConfiavel(de) {
 }
 
 /*
-  Existe número REAL sobre este cliente?
+  Existe número REAL e VIGENTE sobre este cliente?
 
-  Devolve `{ tem: false }` em três situações que o resto do código tratava
-  como diferentes e que são a mesma coisa na prática:
-
+  Devolve `{ tem: false }` quando:
     - não há simulação nenhuma;
     - há simulação, mas sem nenhum número dentro;
-    - há número, mas de procedência desconhecida.
-
-  A terceira é a que faltava. Uma linha antiga, uma escrita por caminho
-  que não passou por `guardarSimulacao`, um `de` que virou null numa
-  migração: o número está lá e ninguém sabe quem colocou. Isso não é dado,
-  é ruído com aparência de dado — e é pior que a ausência, porque a
-  ausência o agente sabe tratar.
+    - a simulação foi marcada como inválida (`valida === false`) ou expirou;
+    - há número, mas de procedência desconhecida ou não confiável (ex.: campanha sem validação).
 */
 export function valorConfiavel(memoria) {
   const s = memoria?.simulacao ?? {};
   const temNumero = !!(s.valor || s.parcela || s.taxa);
 
   if (!temNumero) return { tem: false, porque: "não tenho número nenhum" };
+
+  if (s.valida === false) {
+    return {
+      tem: false,
+      porque: "simulação marcada como inválida",
+      suspeito: s,
+    };
+  }
 
   if (!deFonteConfiavel(s.de)) {
     return {
@@ -79,7 +81,36 @@ export function valorConfiavel(memoria) {
     };
   }
 
-  return { tem: true, simulacao: s, de: s.de };
+  // Verificação de validade temporal explícita (expiraEm definido por guardarSimulacao)
+  const agora = Date.now();
+  if (s.expiraEm) {
+    const expiraMs = new Date(s.expiraEm).getTime();
+    if (Number.isFinite(expiraMs) && agora > expiraMs) {
+      return {
+        tem: false,
+        porque: "simulação expirada",
+        expirada: true,
+        suspeito: s,
+      };
+    }
+  }
+
+  const camposAutorizados = Array.isArray(s.camposAutorizados)
+    ? s.camposAutorizados
+    : [
+        s.valor ? "valor" : null,
+        s.parcela ? "parcela" : null,
+        s.taxa ? "taxa" : null,
+        s.prazo ? "prazo" : null,
+        s.banco ? "banco" : null,
+      ].filter(Boolean);
+
+  return {
+    tem: true,
+    simulacao: s,
+    de: s.de,
+    camposAutorizados,
+  };
 }
 
 /*

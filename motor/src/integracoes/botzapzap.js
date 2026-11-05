@@ -114,6 +114,71 @@ export function limparCacheIntegracao() {
 }
 
 /**
+ * Extrai DDI, DDD e sufixo de 8 dígitos para comparação segura sem colisão entre DDDs distintos.
+ */
+export function decomporTelefone(numero) {
+  const limpo = normalizarTelefone(numero);
+  const semDdi = limpo.startsWith("55") && limpo.length >= 12 ? limpo.slice(2) : limpo;
+  const ddd = semDdi.length >= 10 ? semDdi.slice(0, 2) : null;
+  const sufixo8 = semDdi.length >= 8 ? semDdi.slice(-8) : semDdi;
+  return { limpo, semDdi, ddd, sufixo8 };
+}
+
+function selecionarRegistroSemColisao(mapa, telBuscado) {
+  if (!mapa || typeof mapa !== "object") return { registro: null, chave: null, colisao: false };
+
+  const alvo = decomporTelefone(telBuscado);
+  const candidatosExatos = [];
+  const candidatosMesmoDdd = [];
+  const candidatosSemDdd = [];
+  let houveDivergenciaDdd = false;
+
+  for (const [chave, info] of Object.entries(mapa)) {
+    const item = decomporTelefone(chave);
+    if (!item.sufixo8 || item.sufixo8 !== alvo.sufixo8) continue;
+
+    if (item.semDdi === alvo.semDdi || item.limpo === alvo.limpo) {
+      candidatosExatos.push({ chave, info });
+      continue;
+    }
+
+    if (alvo.ddd && item.ddd) {
+      if (alvo.ddd === item.ddd) {
+        candidatosMesmoDdd.push({ chave, info });
+      } else {
+        houveDivergenciaDdd = true;
+      }
+      continue;
+    }
+
+    candidatosSemDdd.push({ chave, info });
+  }
+
+  if (candidatosExatos.length === 1) {
+    return { registro: candidatosExatos[0].info, chave: candidatosExatos[0].chave, colisao: false };
+  }
+  if (candidatosExatos.length > 1) {
+    return { registro: null, chave: null, colisao: true };
+  }
+
+  if (candidatosMesmoDdd.length === 1) {
+    return { registro: candidatosMesmoDdd[0].info, chave: candidatosMesmoDdd[0].chave, colisao: false };
+  }
+  if (candidatosMesmoDdd.length > 1) {
+    return { registro: null, chave: null, colisao: true };
+  }
+
+  if (candidatosSemDdd.length === 1 && !houveDivergenciaDdd) {
+    return { registro: candidatosSemDdd[0].info, chave: candidatosSemDdd[0].chave, colisao: false };
+  }
+  if (candidatosSemDdd.length > 1 || houveDivergenciaDdd) {
+    return { registro: null, chave: null, colisao: true };
+  }
+
+  return { registro: null, chave: null, colisao: false };
+}
+
+/**
  * Busca o contexto de campanha para um telefone específico.
  * 
  * @param {string} telefone - Número de telefone do contato que enviou mensagem
@@ -134,28 +199,22 @@ export function buscarContextoCampanha(telefone, diretorioBase = obterDiretorioB
   const dadosBase = carregarContatosDados(diretorioBase);
 
   const numbers = enviados.numbers || {};
-  let registroEnvio = null;
-  let chaveEncontrada = null;
+  const buscaEnvio = selecionarRegistroSemColisao(numbers, telefone);
+  const buscaDados = selecionarRegistroSemColisao(dadosBase, telefone);
 
-  // 1. Busca no registro de envios
-  for (const [chave, info] of Object.entries(numbers)) {
-    const sufixoChave = extrairSufixo8(chave);
-    if (sufixoChave === sufixoBuscado) {
-      registroEnvio = info;
-      chaveEncontrada = chave;
-      break;
-    }
+  if (buscaEnvio.colisao || buscaDados.colisao) {
+    log.alerta(`[Botzapzap] Colisão ou divergência de DDD detectada para sufixo ${sufixoBuscado}; associação automática bloqueada.`);
+    return {
+      pertenceCampanha: false,
+      telefone,
+      sufixo: sufixoBuscado,
+      motivo: "colisao_ambigua_ou_ddd_divergente",
+    };
   }
 
-  // 2. Busca nos dados detalhados (planilha importada)
-  let registroDados = null;
-  for (const [chave, info] of Object.entries(dadosBase)) {
-    const sufixoChave = extrairSufixo8(chave);
-    if (sufixoChave === sufixoBuscado) {
-      registroDados = info;
-      break;
-    }
-  }
+  const registroEnvio = buscaEnvio.registro;
+  const chaveEncontrada = buscaEnvio.chave;
+  const registroDados = buscaDados.registro;
 
   if (!registroEnvio && !registroDados) {
     return {

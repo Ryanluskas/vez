@@ -291,29 +291,68 @@ export function jaTeFalei(nomeCliente, quantasVezesJaConfirmei = 0) {
 }
 
 export function respostaObjecao(tipo, nomeCliente) {
-  const nome = nomeCliente ? ` ${nomeCliente}` : "";
+  const curto = primeiroNome(nomeCliente);
+  const nome = curto ? `, ${curto}` : "";
   switch (tipo) {
     case "nao_tem_interesse":
-      return `A questão aqui não é só o dinheiro, mas a economia${nome}: você vai baixar sua taxa para 1,40% ao mês pelo Santander, pagando menos juros pro banco. O dinheiro na conta é um bônus estratégico. Faz sentido, né?`;
+      return `Entendo perfeitamente${nome}. A ideia era só verificar sem compromisso se conseguimos melhorar a condição do seu contrato atual. Prefere que eu encerre por aqui?`;
     case "vou_pensar":
-      return `Pensar agora é deixar dinheiro na mesa e arriscar que a taxa suba amanhã${nome}. O valor já está aprovado e reservado. Tirando isso, tem algo nos números ou na taxa que não te agradou? Posso garantir sua liberação agora?`;
+      return `Sem problema${nome}, pode avaliar com calma. Ficou alguma dúvida sobre como funciona que eu possa te esclarecer agora?`;
     case "conversar_familia":
-      return `Com certeza${nome}! Decisão em família é sagrada. Mas tirando a conversa com ela, a ideia de reduzir os juros pra 1,40% e liberar esse valor líquido sem mexer na parcela ficou boa pra você?`;
+      return `Claro${nome}, faz todo sentido conversar em casa primeiro. Quer que eu deixe um resumo simples do que estamos verificando para vocês olharem juntos?`;
     case "recusa_oferta":
-      return `O prazo ajusta para 120 meses justamente para garantir que você pegue o valor máximo com a taxa reduzida de 1,40% sem subir nada na parcela${nome}. É trocar uma dívida cara por uma mais barata e ainda embolsar a diferença. Vamos fechar?`;
+      return `Entendo o seu ponto${nome}. Quer que eu peça para o consultor verificar se existe outra configuração possível ou prefere encerrar?`;
     case "golpe_seguranca":
-      return `Entendo perfeitamente, hoje em dia tem que desconfiar mesmo${nome}! A CapitalCred é registrada no CNPJ 53.093.082/0001-22 e a formalização é feita 100% no canal oficial do Santander com biometria facial, sem você pagar nada adiantado. Segurança total.`;
+    case "duvida_seguranca":
+      return `Sua cautela está certíssima${nome}. Nós nunca cobramos nada adiantado, nunca pedimos senhas e qualquer assinatura ocorre somente no aplicativo oficial do banco.`;
+    case "reclamacao_grave":
+    case "ameaca_denuncia":
+      return `Entendo sua preocupação${nome} e respeito totalmente sua posição. Estou encerrando o atendimento automático agora e passando para o responsável verificar.`;
     case "nao_envia_documentos":
-      return `Compreendo a cautela${nome}! O documento é exigência do próprio banco para conferência e averbação antifraude. Você prefere me mandar a foto do documento agora ou prefere que eu te chame mais tarde para tirar com calma?`;
+      return `Tudo bem${nome}, respeito sua decisão e não vou insistir no envio. Se quiser, podemos tirar qualquer dúvida primeiro ou falar direto com o consultor.`;
     case "ja_tem_consultor":
-      return `Maravilha, bom quando já tem alguém de confiança${nome}! Só te recomendo conferir se a taxa dele chega a 1,40% ao mês. Se você quiser, comparo sem compromisso pra você ter certeza que tá no melhor negócio.`;
+      return `Ótimo que você já tem alguém de confiança${nome}! Se em algum momento quiser apenas comparar sem compromisso, fico à disposição.`;
     case "nao_entendeu":
-      return `É bem direto${nome}: sua parcela mensal continua rigorosamente igual, a taxa cai de 2,x% para 1,40% e a diferença do refinanciamento cai na sua conta em dinheiro.`;
+      return `Explicando de forma simples${nome}: nós verificamos no sistema do banco se é possível melhorar as condições do seu contrato atual. Quer que eu confirme o seu caso com o consultor?`;
     case "confirmacao_documentos":
-      return `Isso mesmo${nome}! Com esses 5 documentos na mão a gente faz a conferência no Santander, formaliza a operação e já dá entrada na sua liberação.`;
+      return `Isso mesmo${nome}! Com a documentação conferida a gente já encaminha para a análise final no banco.`;
     default:
-      return `Entendo perfeitamente${nome}! Só queria te mostrar porque hoje o banco tá ganhando muito em cima de você com essa taxa de 2,x%. A gente derruba pra 1,40% pra esse lucro voltar pro seu bolso agora, sem subir nada na parcela.`;
+      return `Entendo perfeitamente${nome}. Se quiser que eu verifique alguma dúvida com o consultor, é só me falar.`;
   }
+}
+
+export function respostaRecusaContextual(rotuloRecusado, nomeCliente) {
+  const curto = primeiroNome(nomeCliente);
+  const item = rotuloRecusado && rotuloRecusado !== "geral" ? ` o ${rotuloRecusado}` : " esse documento";
+  const frase = `Tudo bem, respeito sua decisão e não vou pedir${item} novamente. Vou verificar com o consultor como podemos te ajudar sem isso.`;
+  return curto ? `${curto}, ${frase.charAt(0).toLowerCase()}${frase.slice(1)}` : frase;
+}
+
+export function respostaEsclarecimentoContextual(contexto = {}, nomeCliente = null) {
+  const curto = primeiroNome(nomeCliente);
+  const { ultimoRequisito, ultimaPerguntaAgente } = contexto;
+  let frase;
+  if (ultimoRequisito && REQUISITOS[ultimoRequisito]) {
+    frase = `Perdão se ficou confuso! Eu estava perguntando sobre o ${REQUISITOS[ultimoRequisito].rotulo} apenas para o consultor conseguir conferir os dados do seu contrato.`;
+  } else if (ultimaPerguntaAgente) {
+    frase = `Me desculpa se não ficou claro! Eu quis confirmar os dados básicos para o consultor analisar o seu caso certinho.`;
+  } else {
+    frase = `Me desculpa se não ficou claro! Estou verificando as informações do seu contrato com o consultor para te explicar passo a passo.`;
+  }
+  return curto ? `${curto}, ${frase.charAt(0).toLowerCase()}${frase.slice(1)}` : frase;
+}
+
+export function respostaCobrancaContextual(contexto = {}, nomeCliente = null) {
+  const curto = primeiroNome(nomeCliente);
+  let frase;
+  if (contexto.aguardandoConsultor) {
+    frase = "Oi! Ainda estou aguardando a confirmação do consultor aqui no sistema e te aviso assim que sair.";
+  } else if (contexto.ultimoRequisito && REQUISITOS[contexto.ultimoRequisito]) {
+    frase = `Oi! Estou por aqui. Ficou alguma dúvida sobre o que conversamos antes?`;
+  } else {
+    frase = "Oi! Estou por aqui, pode falar.";
+  }
+  return curto ? `${curto}, ${frase.charAt(0).toLowerCase()}${frase.slice(1)}` : frase;
 }
 
 /* ------------------------------------------------------------------
@@ -333,11 +372,9 @@ export function respostaDeterministica({
   semente,
 }) {
   let texto = null;
-  let ehObjecao = false;
 
   if (categoria === "objecao" || objecao) {
     texto = respostaObjecao(objecao?.tipo, nomeCliente);
-    ehObjecao = true;
   } else if (categoria === "saudacao") {
     texto = saudacao(mensagemCliente, nomeCliente, semente);
   } else if (pedido?.texto) {
@@ -346,7 +383,7 @@ export function respostaDeterministica({
     texto = informacaoRecebida(fatosNovos, nomeCliente);
   }
 
-  return conferido(texto, { permitirPersuasao: ehObjecao });
+  return conferido(texto);
 }
 
 /*
@@ -354,13 +391,12 @@ export function respostaDeterministica({
 */
 const ROTULOS_DE_REQUISITO = Object.values(REQUISITOS).map((r) => r.rotulo);
 
-export function conferido(texto, { permitirPersuasao = false } = {}) {
+export function conferido(texto) {
   if (!texto || !texto.trim()) return null;
-  if (permitirPersuasao) return texto;
 
   /*
     Número é o corte que não tem exceção. Nenhuma frase deste arquivo
-    precisa de dígito — nem a que lista o que falta.
+    precisa de dígito — nem a que lista o que falta, nem contorno de objeção.
   */
   if (/\d/.test(texto)) return null;
 

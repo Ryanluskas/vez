@@ -49,7 +49,7 @@ export const REQUISITOS = {
   },
   documento_foto: {
     rotulo: "documento com foto",
-    pedido: "você prefere me mandar a foto do documento (RG ou CNH frente e verso) agora ou prefere que eu te chame mais tarde para tirar com calma?",
+    pedido: "me manda uma foto do documento (RG ou CNH frente e verso)",
     peso: 5,
   },
   comprovante_endereco: {
@@ -167,36 +167,55 @@ export function quantasVezesPerguntei(memoria, chave) {
   return memoria?.perguntado?.[chave]?.vezes ?? 0;
 }
 
+/*
+  O cliente já recusou enviar este item? Se sim, nunca mais pedimos automaticamente.
+*/
+export function foiRecusado(memoria, chave) {
+  if (!memoria || !chave) return false;
+  if (memoria.recusas?.[chave]?.recusado === true) return true;
+  if (Array.isArray(memoria.recusas) && memoria.recusas.some((r) => r?.item === chave || r === chave)) return true;
+  if (memoria.perguntado?._recusas?.[chave]?.recusado === true) return true;
+  if (Array.isArray(memoria.perguntado?._recusas) && memoria.perguntado._recusas.some((r) => r?.item === chave || r === chave)) return true;
+  if (memoria.perguntado?.[chave]?.recusado === true) return true;
+  return false;
+}
+
+/*
+  Retorna o último requisito perguntado ao cliente (se houver).
+*/
+export function ultimoRequisitoPerguntado(memoria) {
+  if (!memoria?.perguntado) return null;
+  const ultimoChaves = memoria.perguntado._ultimo_pedido_chaves;
+  if (Array.isArray(ultimoChaves) && ultimoChaves.length > 0 && REQUISITOS[ultimoChaves[0]]) {
+    return ultimoChaves[0];
+  }
+  const candidatos = Object.entries(memoria.perguntado)
+    .filter(([chave, val]) => {
+      if (!REQUISITOS[chave]) return false;
+      const vezes = typeof val === "number" ? val : (val?.vezes ?? 0);
+      return vezes > 0;
+    })
+    .sort((a, b) => new Date(b[1]?.em ?? 0) - new Date(a[1]?.em ?? 0));
+  return candidatos[0]?.[0] ?? null;
+}
+
 const DESISTIR_APOS = 2;
 
 /*
-  Monta UMA mensagem pedindo só o que falta, no máximo dois itens, pulando
-  o que já foi pedido duas vezes sem resposta — insistir na terceira não
-  traz o documento, traz bloqueio.
+  Monta UMA mensagem pedindo só o que falta, no máximo um item por vez, pulando
+  o que já foi recusado pelo cliente ou pedido duas vezes sem resposta — insistir
+  não traz o documento, traz bloqueio.
 
   Devolve null quando não há o que pedir, ou quando tudo que falta já foi
-  pedido demais: aí o caso é do consultor, não do bot.
+  recusado ou pedido demais: aí o caso é do consultor, não do bot.
 */
 export function montarPedido(memoria, opcoes = {}) {
   const para = typeof opcoes === "string" ? opcoes : (opcoes?.para ?? "simular");
   const faltando = queFalta(memoria, { para }).filter(
-    (chave) => quantasVezesPerguntei(memoria, chave) < DESISTIR_APOS
+    (chave) => !foiRecusado(memoria, chave) && quantasVezesPerguntei(memoria, chave) < DESISTIR_APOS
   );
 
   if (faltando.length === 0) return null;
-
-  if (para === "fechar") {
-    const textoCompleto =
-      `Para formalizar a liberação no Santander com segurança e emitir seu contrato digital, vou precisar desta documentação:\n\n` +
-      `• Documento com foto (RG ou CNH frente e verso)\n` +
-      `• Comprovante de endereço atualizado\n` +
-      `• Contracheque atualizado\n` +
-      `• Extrato de margem consignável\n` +
-      `• Número(s) do(s) contrato(s) do Santander que vamos refinanciar\n\n` +
-      `Você prefere me mandar a foto do documento agora ou prefere que eu te chame daqui a pouco para tirar com calma?`;
-
-    return { chaves: faltando, texto: textoCompleto, faltamAinda: 0 };
-  }
 
   const agora = faltando.slice(0, MAXIMO_POR_MENSAGEM);
   const pedidos = agora.map((c) => REQUISITOS[c].pedido);

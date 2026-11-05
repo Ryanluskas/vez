@@ -226,33 +226,58 @@ export function criarLista(supabase, userId) {
     };
   }
 
+  function extrairDdd(digitos) {
+    const semDdi = digitos.startsWith("55") && digitos.length >= 12 ? digitos.slice(2) : digitos;
+    return semDdi.length >= 10 ? semDdi.slice(0, 2) : null;
+  }
+
   async function buscarPorTelefone(telefone) {
     const so = String(telefone ?? "").replace(/\D/g, "");
     if (so.length < 8) return null;
 
     const curto = so.slice(-8);
+    const dddBuscado = extrairDdd(so);
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("lista_clientes")
-      .select("id, nome, cpf, telefone, dados, listas!inner(ativa, nome)")
-      .eq("listas.ativa", true)
+      .select("id, nome, cpf, telefone, dados, listas!inner(ativa, nome, user_id)")
+      .eq("listas.ativa", true);
+
+    if (userId && typeof query.eq === "function") {
+      query = query.eq("user_id", userId);
+    }
+
+    const { data, error } = await query
       .or(`telefone.eq.${so},telefone_curto.eq.${curto}`)
-      .limit(2);
+      .limit(5);
 
     // Tabela ainda não criada (19_listas.sql): é ausência, não erro.
     if (error || !data?.length) return null;
 
+    // Filtra candidatos que pertencem a outro DDD (evita vazamento por colisão de 8 dígitos)
+    const compativeis = data.filter((d) => {
+      const telCand = String(d.telefone ?? "").replace(/\D/g, "");
+      if (telCand === so) return true;
+      const dddCand = extrairDdd(telCand);
+      if (dddBuscado && dddCand && dddBuscado !== dddCand) {
+        return false;
+      }
+      return true;
+    });
+
+    if (compativeis.length === 0) return null;
+
     /*
-      Dois clientes com o mesmo final de telefone. Não dá pra escolher, e
-      escolher errado é falar o saldo de um pro outro. Devolve nada.
+      Dois clientes com o mesmo final de telefone no mesmo DDD. Não dá pra
+      escolher, e escolher errado é falar o saldo de um pro outro. Devolve nada.
     */
-    if (data.length > 1) {
-      const exato = data.filter((d) => d.telefone === so);
+    if (compativeis.length > 1) {
+      const exato = compativeis.filter((d) => String(d.telefone ?? "").replace(/\D/g, "") === so);
       if (exato.length !== 1) return null;
       return exato[0];
     }
 
-    return data[0];
+    return compativeis[0];
   }
 
   return {

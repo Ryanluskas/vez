@@ -153,15 +153,20 @@ export function criarClienteEvolution({
       });
     },
 
-    async enviarTexto({ nomeInstancia, numero, texto, quoted = null }) {
-      if (!numero || !texto) {
+    async enviarTexto({ nomeInstancia, instancia, numero, para, texto, quoted = null } = {}) {
+      const inst = nomeInstancia || instancia;
+      const destino = numero || para;
+      if (!destino || !texto) {
         throw new Error("Número e texto são obrigatórios para envio.");
+      }
+      if (!inst) {
+        throw new Error("Nome da instância Evolution é obrigatório para envio.");
       }
 
       // Se for JID (@s.whatsapp.net, @lid, @g.us), preserva o identificador original.
       // Se vier do legado como @c.us, normaliza para @s.whatsapp.net exigido pelo Baileys/Evolution.
       // Se for apenas dígitos, normaliza limpando caracteres não-numéricos.
-      let destinoFormatado = String(numero).trim();
+      let destinoFormatado = String(destino).trim();
       if (destinoFormatado.endsWith("@c.us")) {
         destinoFormatado = destinoFormatado.replace(/@c\.us$/, "@s.whatsapp.net");
       } else if (!destinoFormatado.includes("@")) {
@@ -178,7 +183,7 @@ export function criarClienteEvolution({
         payload.quoted = quoted;
       }
 
-      const res = await requisicao(`/message/sendText/${encodeURIComponent(nomeInstancia)}`, {
+      const res = await requisicao(`/message/sendText/${encodeURIComponent(inst)}`, {
         metodo: "POST",
         corpo: payload,
       });
@@ -191,20 +196,44 @@ export function criarClienteEvolution({
       };
     },
 
-    async enviarMedia({ nomeInstancia, numero, mediaUrlOuBase64, mediatype = "document", caption = "" }) {
-      const destinoFormatado = String(numero).includes("@")
-        ? String(numero).trim()
-        : String(numero).replace(/\D/g, "");
+    async enviarMedia({
+      nomeInstancia,
+      instancia,
+      numero,
+      para,
+      mediaUrlOuBase64,
+      urlOuBase64,
+      mediatype = "document",
+      mimetype = null,
+      fileName = null,
+      nomeArquivo = null,
+      caption = "",
+      legenda = "",
+    } = {}) {
+      const inst = nomeInstancia || instancia;
+      const destino = numero || para;
+      const midia = mediaUrlOuBase64 || urlOuBase64;
+      if (!inst || !destino || !midia) {
+        throw new Error("Instância, destinatário e mídia são obrigatórios para enviarMedia.");
+      }
 
-      return requisicao(`/message/sendMedia/${encodeURIComponent(nomeInstancia)}`, {
+      const destinoFormatado = String(destino).includes("@")
+        ? String(destino).trim()
+        : String(destino).replace(/\D/g, "");
+
+      const corpo = {
+        number: destinoFormatado,
+        media: midia,
+        mediatype: mediatype || (mimetype && mimetype.startsWith("image/") ? "image" : "document"),
+        caption: caption || legenda || "",
+        delay: 1200,
+      };
+      if (mimetype) corpo.mimetype = mimetype;
+      if (fileName || nomeArquivo) corpo.fileName = fileName || nomeArquivo;
+
+      return requisicao(`/message/sendMedia/${encodeURIComponent(inst)}`, {
         metodo: "POST",
-        corpo: {
-          number: destinoFormatado,
-          media: mediaUrlOuBase64,
-          mediatype,
-          caption,
-          delay: 1200,
-        },
+        corpo,
       });
     },
 

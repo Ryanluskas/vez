@@ -15,10 +15,30 @@ import crypto from "node:crypto";
   ============================================================================
 */
 
-const HMAC_SECRET =
-  process.env.DOSSIE_HMAC_SECRET ||
-  process.env.SUPABASE_JWT_SECRET ||
-  "vez_dossie_hmac_secret_master_key_2026";
+const SEGREDOS_PROIBIDOS = new Set([
+  "vez_dossie_hmac_secret_master_key_2026",
+  "changeme",
+  "secret",
+  "default",
+  "exemplo",
+  "123456",
+  "test",
+]);
+
+/**
+ * Obtém e valida o segredo HMAC-SHA256 configurado no ambiente.
+ * Falha de forma segura (fail-closed) caso o segredo esteja ausente, fraco ou use valor de exemplo.
+ */
+export function obterSegredoHmac(segredoExplicito = null) {
+  const candidato = String(segredoExplicito ?? process.env.DOSSIE_HMAC_SECRET ?? "").trim();
+  if (!candidato || candidato.length < 32) {
+    return null;
+  }
+  if (SEGREDOS_PROIBIDOS.has(candidato.toLowerCase())) {
+    return null;
+  }
+  return candidato;
+}
 
 /**
  * Gera hash SHA-256 consolidado da lista de documentos anexados ao dossiê.
@@ -57,6 +77,7 @@ export function calcularHashDadosBancarios(dadosBancarios = {}) {
 
 /**
  * Gera a assinatura criptográfica autenticada (HMAC-SHA256) do dossiê aprovado.
+ * Exige DOSSIE_HMAC_SECRET válido (>= 32 caracteres); bloqueia geração caso ausente.
  */
 export function gerarHashAprovacao({
   idOperacao,
@@ -70,11 +91,20 @@ export function gerarHashAprovacao({
   dadosBancariosHash = null,
   userId,
   timestamp = new Date().toISOString(),
+  nonce = "",
+  segredo = null,
 }) {
+  const chaveHmac = obterSegredoHmac(segredo);
+  if (!chaveHmac) {
+    throw new Error(
+      "Segredo DOSSIE_HMAC_SECRET ausente ou inseguro (mínimo de 32 caracteres exclusivos obrigatório). Aprovação bloqueada."
+    );
+  }
+
   const docHash = documentosHash || (documentos ? calcularHashDocumentos(documentos) : "");
   const bankHash = dadosBancariosHash || (dadosBancarios ? calcularHashDadosBancarios(dadosBancarios) : "");
 
-  const payload = [
+  const partes = [
     String(idOperacao || ""),
     String(codigoOperacao || ""),
     String(idOrganizacao || ""),
@@ -84,14 +114,21 @@ export function gerarHashAprovacao({
     String(bankHash || ""),
     String(userId || ""),
     String(timestamp || ""),
-  ].join("|::|");
+  ];
 
-  return crypto.createHmac("sha256", HMAC_SECRET).update(payload, "utf8").digest("hex");
+  if (nonce) {
+    partes.push(String(nonce));
+  }
+
+  const payload = partes.join("|::|");
+
+  return crypto.createHmac("sha256", chaveHmac).update(payload, "utf8").digest("hex");
 }
 
 /**
  * Valida a integridade da aprovação humana comparando a assinatura recebida
- * com o HMAC-SHA256 recalculado dos dados. Inclui verificação de expiração de 24h.
+ * exclusivamente com o HMAC-SHA256 recalculado dos dados. Inclui verificação de expiração de 24h.
+ * Não aceita fallback SHA-256 simples sem chave secreta.
  */
 export function validarIntegridadeAprovacao({
   idOperacao,
@@ -105,70 +142,95 @@ export function validarIntegridadeAprovacao({
   dadosBancariosHash = null,
   userId,
   timestamp,
+  nonce = "",
   hashEsperado,
+  segredo = null,
 }) {
   if (!hashEsperado || typeof hashEsperado !== "string") return false;
 
-  // 1. Verificação de expiração temporal (máximo 24h)
-  if (timestamp) {
-    const dataAprovacao = new Date(timestamp).getTime();
-    const agora = Date.now();
-    if (Number.isFinite(dataAprovacao)) {
-      // Rejeita aprovação com mais de 24h (tolerância de 5 min para clock skew)
-      if (agora - dataAprovacao > 24 * 60 * 60 * 1000 + 5 * 60 * 1000) {
-        return false;
-      }
-    }
+  const chaveHmac = obterSegredoHmac(segredo);
+  if (!chaveHmac) {
+    return false;
   }
 
-  // 2. Assinatura canônica HMAC-SHA256
-  const calculadoHmac = gerarHashAprovacao({
-    idOperacao,
-    codigoOperacao,
-    idOrganizacao,
-    versao,
-    textoPagamento,
-    documentos,
-    documentosHash,
-    dadosBancarios,
-    dadosBancariosHash,
-    userId,
-    timestamp,
-  });
+  // 1. Verificação de expiração temporal (máximo 24h)
+  if (!timestamp) return false;
+  const dataAprovacao = new Date(timestamp).getTime();
+  const agora = Date.now();
+  if (!Number.isFinite(dataAprovacao)) {
+    return false;
+  }
+  // Rejeita aprovação com mais de 24h ou no futuro além de 5 min de clock skew
+  if (agora - dataAprovacao > 24 * 60 * 60 * 1000 + 5 * 60 * 1000 || dataAprovacao - agora > 5 * 60 * 1000) {
+    return false;
+  }
 
+  // 2. Assinatura canônica exclusiva HMAC-SHA256
   try {
+    const calculadoHmac = gerarHashAprovacao({
+      idOperacao,
+      codigoOperacao,
+      idOrganizacao,
+      versao,
+      textoPagamento,
+      documentos,
+      documentosHash,
+      dadosBancarios,
+      dadosBancariosHash,
+      userId,
+      timestamp,
+      nonce,
+      segredo: chaveHmac,
+    });
+
     const bufCalculado = Buffer.from(calculadoHmac, "hex");
     const bufEsperado = Buffer.from(hashEsperado, "hex");
-    if (bufCalculado.length === bufEsperado.length && crypto.timingSafeEqual(bufCalculado, bufEsperado)) {
+    if (bufCalculado.length > 0 && bufCalculado.length === bufEsperado.length && crypto.timingSafeEqual(bufCalculado, bufEsperado)) {
       return true;
     }
-  } catch {}
-
-  // 3. Fallback retrocompatível para registros legados que usavam plain SHA-256
-  const payloadLegado = [
-    String(idOperacao || ""),
-    String(codigoOperacao || ""),
-    String(textoPagamento || "").trim(),
-    String(userId || ""),
-    String(timestamp || ""),
-  ].join("|::|");
-  const calculadoLegado = crypto.createHash("sha256").update(payloadLegado, "utf8").digest("hex");
-
-  try {
-    const bufCalculadoLegado = Buffer.from(calculadoLegado, "hex");
-    const bufEsperado = Buffer.from(hashEsperado, "hex");
-    if (bufCalculadoLegado.length === bufEsperado.length && crypto.timingSafeEqual(bufCalculadoLegado, bufEsperado)) {
-      return true;
-    }
-  } catch {}
+  } catch {
+    return false;
+  }
 
   return false;
 }
 
 /**
+ * Converte de forma controlada uma operação legada (sem HMAC válido ou sem hashes de anexo/banco)
+ * para o estado que exige nova aprovação humana explícita, sem aprová-la automaticamente.
+ */
+export function migrarOperacaoLegadaParaReaprovacao(operacao = {}) {
+  return {
+    ...operacao,
+    status: "conferido_pendente_aprovacao",
+    hash_aprovacao: null,
+    aprovado_por: null,
+    aprovado_em: null,
+    requer_reaprovacao: true,
+    motivo_reaprovacao:
+      "Assinatura legada ou incompleta invalidada pela política de segurança HMAC-SHA256; exige nova aprovação humana.",
+  };
+}
+
+/**
  * Barreira de segurança mandatória antes de qualquer envio ao WhatsApp.
  */
-export function autorizarEnvioAoGrupo({ operacao = {}, userId = null } = {}) {
+export function autorizarEnvioAoGrupo({ operacao = {}, userId = null, segredo = null } = {}) {
+  if (!operacao || typeof operacao !== "object") {
+    return {
+      autorizado: false,
+      motivo: "Operação inválida ou ausente.",
+    };
+  }
+
+  // 0. Proteção contra replay / reenvio de aprovação já consumida
+  if (operacao.status === "encaminhado" || operacao.encaminhado_em || operacao.aprovacao_consumida_em) {
+    return {
+      autorizado: false,
+      motivo: "Operação já foi encaminhada anteriormente (replay de aprovação bloqueado).",
+    };
+  }
+
   // 1. Status deve ser expressamente 'aprovado'
   if (operacao.status !== "aprovado") {
     return {
@@ -177,7 +239,16 @@ export function autorizarEnvioAoGrupo({ operacao = {}, userId = null } = {}) {
     };
   }
 
-  // 2. Deve ter operador humano aprovador registrado
+  // 2. Isolamento multi-tenant quando userId do executor é informado
+  const tenantOperacao = operacao.user_id || operacao.id_organizacao || null;
+  if (userId && tenantOperacao && String(tenantOperacao) !== String(userId)) {
+    return {
+      autorizado: false,
+      motivo: "Violação de isolamento multi-tenant: operação pertence a outra organização.",
+    };
+  }
+
+  // 3. Deve ter operador humano aprovador registrado
   if (!operacao.aprovado_por) {
     return {
       autorizado: false,
@@ -185,7 +256,7 @@ export function autorizarEnvioAoGrupo({ operacao = {}, userId = null } = {}) {
     };
   }
 
-  // 3. Deve possuir hash de integridade
+  // 4. Deve possuir hash de integridade
   if (!operacao.hash_aprovacao) {
     return {
       autorizado: false,
@@ -193,7 +264,7 @@ export function autorizarEnvioAoGrupo({ operacao = {}, userId = null } = {}) {
     };
   }
 
-  // 4. Deve possuir texto de pagamento não vazio
+  // 5. Deve possuir texto de pagamento não vazio
   if (!operacao.texto_pagamento || operacao.texto_pagamento.trim().length < 50) {
     return {
       autorizado: false,
@@ -201,7 +272,15 @@ export function autorizarEnvioAoGrupo({ operacao = {}, userId = null } = {}) {
     };
   }
 
-  // 5. Validação rigorosa de integridade criptográfica (anti-tampering & expiração)
+  // 6. Segredo HMAC deve estar configurado no ambiente
+  if (!obterSegredoHmac(segredo)) {
+    return {
+      autorizado: false,
+      motivo: "Segredo DOSSIE_HMAC_SECRET ausente ou inseguro no ambiente; envio bloqueado por segurança.",
+    };
+  }
+
+  // 7. Validação rigorosa de integridade criptográfica (anti-tampering & expiração)
   const integridadeValida = validarIntegridadeAprovacao({
     idOperacao: operacao.id,
     codigoOperacao: operacao.codigo_operacao,
@@ -212,13 +291,15 @@ export function autorizarEnvioAoGrupo({ operacao = {}, userId = null } = {}) {
     dadosBancariosHash: operacao.dados_bancarios_hash || null,
     userId: operacao.aprovado_por,
     timestamp: operacao.aprovado_em,
+    nonce: operacao.nonce_aprovacao || "",
     hashEsperado: operacao.hash_aprovacao,
+    segredo,
   });
 
   if (!integridadeValida) {
     return {
       autorizado: false,
-      motivo: "Violação de integridade criptográfica: os dados da operação foram adulterados após a aprovação humana ou a aprovação expirou (>24h).",
+      motivo: "Violação de integridade criptográfica: os dados da operação foram adulterados após a aprovação humana, a assinatura é legada sem HMAC ou a aprovação expirou (>24h).",
     };
   }
 

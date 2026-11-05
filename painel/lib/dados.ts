@@ -518,8 +518,96 @@ export async function obterFatosDaConversa(
   const supabase = await criarClienteServidor();
   const { data } = await supabase
     .from("memoria")
-    .select("chave, valor, confianca")
-    .eq("id_conversa", idConversa);
+    .select("*")
+    .eq("id_conversa", idConversa)
+    .maybeSingle();
 
-  return (data as FatoMemoria[]) ?? [];
+  if (!data || typeof data !== "object") return [];
+
+  const registro = data as Record<string, unknown>;
+  const fatos: FatoMemoria[] = [];
+
+  if (typeof registro.nome === "string" && registro.nome.trim()) {
+    fatos.push({ chave: "nome", valor: registro.nome.trim(), confianca: 1 });
+  }
+  if (typeof registro.convenio === "string" && registro.convenio.trim()) {
+    fatos.push({ chave: "convênio", valor: registro.convenio.trim().toUpperCase(), confianca: 1 });
+  }
+  if (typeof registro.banco === "string" && registro.banco.trim()) {
+    fatos.push({ chave: "banco", valor: registro.banco.trim(), confianca: 1 });
+  }
+  if (typeof registro.objetivo === "string" && registro.objetivo.trim()) {
+    fatos.push({
+      chave: "objetivo",
+      valor: registro.objetivo.replace(/_/g, " "),
+      confianca: 0.9,
+    });
+  }
+  if (typeof registro.etapa_comercial === "string" && registro.etapa_comercial.trim()) {
+    fatos.push({
+      chave: "etapa comercial",
+      valor: registro.etapa_comercial.replace(/_/g, " "),
+      confianca: 1,
+    });
+  }
+
+  const coletado =
+    registro.coletado && typeof registro.coletado === "object"
+      ? (registro.coletado as Record<string, { confirmado?: boolean }>)
+      : {};
+  const docsConfirmados = Object.entries(coletado)
+    .filter(([, v]) => v?.confirmado)
+    .map(([k]) => k.replace(/_/g, " "));
+  if (docsConfirmados.length > 0) {
+    fatos.push({
+      chave: "documentos recebidos",
+      valor: docsConfirmados.join(", "),
+      confianca: 1,
+    });
+  }
+
+  const perguntado =
+    registro.perguntado && typeof registro.perguntado === "object"
+      ? (registro.perguntado as Record<string, unknown>)
+      : {};
+  const recusas =
+    (registro.recusas as Record<string, { recusado?: boolean }> | undefined) ??
+    (perguntado._recusas as Record<string, { recusado?: boolean }> | undefined) ??
+    {};
+  const itensRecusados = Object.entries(recusas)
+    .filter(([, v]) => v?.recusado)
+    .map(([k]) => k.replace(/_/g, " "));
+  if (itensRecusados.length > 0) {
+    fatos.push({
+      chave: "recusas registradas",
+      valor: itensRecusados.join(", "),
+      confianca: 1,
+    });
+  }
+
+  const ultimaPerguntaAgente =
+    (registro.ultima_pergunta_agente as string | undefined) ??
+    (perguntado._ultima_pergunta_agente as string | undefined);
+  if (typeof ultimaPerguntaAgente === "string" && ultimaPerguntaAgente.trim()) {
+    fatos.push({
+      chave: "última pergunta do agente",
+      valor: ultimaPerguntaAgente.trim(),
+      confianca: 1,
+    });
+  }
+
+  const simulacao =
+    registro.simulacao && typeof registro.simulacao === "object"
+      ? (registro.simulacao as Record<string, unknown>)
+      : null;
+  if (simulacao?.valor) {
+    const origemSim = typeof simulacao.de === "string" ? simulacao.de : "sistema";
+    fatos.push({
+      chave: `simulação (${origemSim})`,
+      valor: String(simulacao.valor),
+      confianca: 1,
+    });
+  }
+
+  return fatos;
 }

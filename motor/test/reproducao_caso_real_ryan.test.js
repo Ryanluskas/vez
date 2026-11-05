@@ -15,8 +15,8 @@ test("Caso Real Ryan: Cliente pede simulação -> Objeções e Documentos 5 iten
     assert.equal(objecao.tipo, TIPOS_OBJECAO.ACORDO_FECHAMENTO);
   });
 
-  await t.test("2. Fechamento DEVE exigir os 5 documentos oficiais completos (não apenas RG)", () => {
-    const memoria = { nome: "Ryan Lukas" };
+  await t.test("2. Fechamento solicita documentos 1 por vez, sem despejar lista de 5 itens", () => {
+    const memoria = { nome: "Ryan Lukas", convenio: "inss", banco: "santander" };
     const decisao = decidir({
       conversa: { etapa: "qualificado", soVoce: false, temPendenciaAberta: false },
       memoria,
@@ -26,18 +26,9 @@ test("Caso Real Ryan: Cliente pede simulação -> Objeções e Documentos 5 iten
 
     assert.equal(decisao.acao, ACOES.PERGUNTAR_CLIENTE);
     assert.ok(decisao.pedido?.texto, "Deve conter texto de pedido");
-    
-    // Verifica presença dos 5 documentos obrigatórios no texto gerado
-    const texto = decisao.pedido.texto;
-    assert.match(texto, /documento\s+(?:oficial\s+)?com\s+foto/i, "Deve pedir documento com foto");
-    assert.match(texto, /comprovante\s+de\s+endere[cç]o/i, "Deve pedir comprovante de endereço");
-    assert.match(texto, /contracheque/i, "Deve pedir contracheque atualizado");
-    assert.match(texto, /extrato\s+de\s+margem/i, "Deve pedir extrato de margem");
-    assert.match(texto, /contrato.*santander/i, "Deve pedir contrato(s) do Santander");
-    assert.match(texto, /alternativa|prefere\s+me\s+mandar/i, "Deve encerrar com alternativa ilusória");
-
-    // Verifica que as chaves de fechamento contêm os 5 requisitos
-    assert.deepEqual(decisao.pedido.chaves, PARA_FECHAR);
+    assert.equal(decisao.pedido.chaves.length, 1, "Deve pedir 1 item por vez");
+    assert.equal(/prefere\s+me\s+mandar\s+agora\s+ou/i.test(decisao.pedido.texto), false, "Não deve usar escolha forçada");
+    assert.equal(PARA_FECHAR.length, 5, "PARA_FECHAR preserva os 5 requisitos oficiais");
   });
 
   await t.test("3. Cliente pergunta 'Só isso mesmo?' -> Bot confirma com segurança e objetividade", () => {
@@ -48,8 +39,7 @@ test("Caso Real Ryan: Cliente pede simulação -> Objeções e Documentos 5 iten
 
     const resposta = respostaObjecao(objecao.tipo, "Ryan");
     assert.match(resposta, /isso\s+mesmo/i);
-    assert.match(resposta, /5\s+documentos/i);
-    assert.match(resposta, /santander/i);
+    assert.match(resposta, /documenta[cç][aã]o\s+conferida/i);
   });
 
   await t.test("4. Calculadora CapitalCred: Total R$ 7.600 -> cliente recebe proposta líquida", () => {

@@ -110,6 +110,8 @@ test("Multi-Tenant Adversarial: Worker de follow-up de Tenant Beta não processa
 // 2. TESTES ADVERSARIAIS DO HMAC E APROVAÇÃO DO DOSSIÊ
 // ============================================================================
 
+process.env.DOSSIE_HMAC_SECRET = "chave_exclusiva_de_teste_automatizado_hmac_sha256_segura_2026";
+
 test("HMAC Adversarial: Alteração de 1 caractere no texto de pagamento invalida aprovação", () => {
   const ts = new Date().toISOString();
   const params = {

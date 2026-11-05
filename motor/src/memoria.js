@@ -50,6 +50,38 @@ function limpar(valor, permitidos) {
 }
 
 export function criarMemoria(supabase, userId) {
+  function hidratar(registro) {
+    if (!registro) return null;
+    const perguntado = registro.perguntado && typeof registro.perguntado === "object" ? registro.perguntado : {};
+    const recusas =
+      registro.recusas && typeof registro.recusas === "object"
+        ? registro.recusas
+        : perguntado._recusas && typeof perguntado._recusas === "object"
+          ? perguntado._recusas
+          : {};
+    const objecoes = Array.isArray(registro.objecoes_identificadas)
+      ? registro.objecoes_identificadas
+      : Array.isArray(perguntado._objecoes)
+        ? perguntado._objecoes
+        : [];
+    const ultimaPerguntaAgente =
+      registro.ultima_pergunta_agente ?? perguntado._ultima_pergunta_agente ?? null;
+    const ultimaPerguntaCliente =
+      registro.ultima_pergunta_cliente ?? perguntado._ultima_pergunta_cliente ?? null;
+    const contextoCampanha =
+      registro.contexto_campanha ?? perguntado._contexto_campanha ?? null;
+
+    return {
+      ...registro,
+      perguntado,
+      recusas,
+      objecoes_identificadas: objecoes,
+      ultima_pergunta_agente: ultimaPerguntaAgente,
+      ultima_pergunta_cliente: ultimaPerguntaCliente,
+      contexto_campanha: contextoCampanha,
+    };
+  }
+
   async function ler(idConversa) {
     let query = supabase
       .from("memoria")
@@ -61,7 +93,7 @@ export function criarMemoria(supabase, userId) {
     }
 
     const { data } = await query.maybeSingle();
-    return data ?? null;
+    return hidratar(data ?? null);
   }
 
   async function garantir(idConversa) {
@@ -77,7 +109,7 @@ export function criarMemoria(supabase, userId) {
     // Corrida entre duas mensagens da mesma pessoa: a segunda perde no
     // indice unico e so precisa reler o que a primeira criou.
     if (error) return await ler(idConversa);
-    return data;
+    return hidratar(data);
   }
 
   /*
@@ -85,7 +117,14 @@ export function criarMemoria(supabase, userId) {
     mais que o segundo: se ele disse "Santander" e depois a IA achou que
     era "Bradesco" numa frase ambígua, fica o primeiro.
   */
-  async function aprender(idConversa, novos) {
+  async function aprender(idConversa, novosOuCampo, valorPosicional = undefined) {
+    const novos =
+      typeof novosOuCampo === "string"
+        ? { [novosOuCampo]: valorPosicional }
+        : novosOuCampo && typeof novosOuCampo === "object"
+          ? novosOuCampo
+          : {};
+
     const atual = await garantir(idConversa);
     if (!atual) return null;
 
@@ -111,30 +150,209 @@ export function criarMemoria(supabase, userId) {
     const aprendido = Object.keys(mudanca).filter((k) => k !== "atualizado_em");
     if (aprendido.length) log.info(`   aprendi: ${aprendido.join(", ")}`);
 
-    return data ?? atual;
+    return hidratar(data ?? { ...atual, ...mudanca });
   }
 
   /* Conta quantas vezes já pedimos cada coisa — base do anti-loop. */
-  async function registrarPergunta(idConversa, chaves) {
+  async function registrarPergunta(idConversa, chaves = [], textoPergunta = null) {
     const atual = await garantir(idConversa);
     if (!atual) return null;
 
+    const agora = new Date().toISOString();
+    const listaChaves = Array.isArray(chaves) ? chaves : [chaves].filter(Boolean);
     const perguntado = { ...(atual.perguntado ?? {}) };
-    for (const chave of chaves) {
+
+    for (const chave of listaChaves) {
       perguntado[chave] = {
+        ...(perguntado[chave] ?? {}),
         vezes: (perguntado[chave]?.vezes ?? 0) + 1,
-        em: new Date().toISOString(),
+        em: agora,
       };
+    }
+
+    if (listaChaves.length > 0) {
+      perguntado._ultimo_pedido_chaves = listaChaves;
+    }
+
+    const perguntaResolvida =
+      textoPergunta ||
+      (listaChaves[0] && REQUISITOS[listaChaves[0]]?.pedido) ||
+      perguntado._ultima_pergunta_agente ||
+      null;
+
+    if (perguntaResolvida) {
+      perguntado._ultima_pergunta_agente = perguntaResolvida;
+      perguntado._ultima_pergunta_em = agora;
     }
 
     const { data } = await supabase
       .from("memoria")
-      .update({ perguntado, atualizado_em: new Date().toISOString() })
+      .update({ perguntado, atualizado_em: agora })
       .eq("id_conversa", idConversa)
       .select("*")
       .single();
 
-    return data ?? atual;
+    return hidratar(data ?? { ...atual, perguntado });
+  }
+
+  async function registrarUltimaPerguntaAgente(idConversa, texto, chaves = []) {
+    const atual = await garantir(idConversa);
+    if (!atual) return null;
+
+    const agora = new Date().toISOString();
+    const perguntado = {
+      ...(atual.perguntado ?? {}),
+      _ultima_pergunta_agente: String(texto || "").trim(),
+      _ultima_pergunta_em: agora,
+      ...(Array.isArray(chaves) && chaves.length ? { _ultimo_pedido_chaves: chaves } : {}),
+    };
+
+    const { data } = await supabase
+      .from("memoria")
+      .update({ perguntado, atualizado_em: agora })
+      .eq("id_conversa", idConversa)
+      .select("*")
+      .single();
+
+    return hidratar(data ?? { ...atual, perguntado });
+  }
+
+  async function registrarUltimaPerguntaCliente(idConversa, texto) {
+    const atual = await garantir(idConversa);
+    if (!atual) return null;
+
+    const agora = new Date().toISOString();
+    const perguntado = {
+      ...(atual.perguntado ?? {}),
+      _ultima_pergunta_cliente: String(texto || "").trim(),
+      _ultima_pergunta_cliente_em: agora,
+    };
+
+    const { data } = await supabase
+      .from("memoria")
+      .update({ perguntado, atualizado_em: agora })
+      .eq("id_conversa", idConversa)
+      .select("*")
+      .single();
+
+    return hidratar(data ?? { ...atual, perguntado });
+  }
+
+  /*
+    Registra recusa explícita ou contextual do cliente a um pedido (ex.: "Não",
+    "Não vou mandar extrato"). Garante que o mesmo item nunca seja pedido novamente.
+  */
+  async function registrarRecusa(idConversa, chavesOuAlvo = null, textoCliente = "") {
+    const atual = await garantir(idConversa);
+    if (!atual) return null;
+
+    const agora = new Date().toISOString();
+    const perguntado = { ...(atual.perguntado ?? {}) };
+    const recusas = { ...(atual.recusas ?? perguntado._recusas ?? {}) };
+
+    let alvos = [];
+    if (Array.isArray(chavesOuAlvo) && chavesOuAlvo.length > 0) {
+      alvos = chavesOuAlvo;
+    } else if (typeof chavesOuAlvo === "string" && chavesOuAlvo.trim()) {
+      alvos = [chavesOuAlvo.trim()];
+    } else if (Array.isArray(perguntado._ultimo_pedido_chaves) && perguntado._ultimo_pedido_chaves.length > 0) {
+      alvos = perguntado._ultimo_pedido_chaves;
+    } else {
+      const pedidos = Object.entries(perguntado)
+        .filter(([chave]) => REQUISITOS[chave])
+        .sort((a, b) => new Date(b[1]?.em ?? 0) - new Date(a[1]?.em ?? 0));
+      if (pedidos[0]?.[0]) {
+        alvos = [pedidos[0][0]];
+      }
+    }
+
+    if (alvos.length === 0) {
+      alvos = ["geral"];
+    }
+
+    for (const alvo of alvos) {
+      recusas[alvo] = {
+        recusado: true,
+        vezes: (recusas[alvo]?.vezes ?? 0) + 1,
+        em: agora,
+        texto: String(textoCliente || "").slice(0, 200),
+      };
+      if (REQUISITOS[alvo]) {
+        perguntado[alvo] = {
+          ...(perguntado[alvo] ?? {}),
+          vezes: Math.max(perguntado[alvo]?.vezes ?? 1, 2),
+          recusado: true,
+          recusado_em: agora,
+        };
+      }
+    }
+
+    perguntado._recusas = recusas;
+
+    const { data } = await supabase
+      .from("memoria")
+      .update({ perguntado, atualizado_em: agora })
+      .eq("id_conversa", idConversa)
+      .select("*")
+      .single();
+
+    return hidratar(data ?? { ...atual, perguntado, recusas });
+  }
+
+  async function registrarObjecao(idConversa, tipo, textoCliente = "") {
+    const atual = await garantir(idConversa);
+    if (!atual) return null;
+
+    const agora = new Date().toISOString();
+    const perguntado = { ...(atual.perguntado ?? {}) };
+    const lista = Array.isArray(atual.objecoes_identificadas)
+      ? [...atual.objecoes_identificadas]
+      : [];
+
+    lista.push({
+      tipo: String(tipo || "indefinida"),
+      texto: String(textoCliente || "").slice(0, 200),
+      em: agora,
+    });
+
+    perguntado._objecoes = lista.slice(-20);
+
+    const { data } = await supabase
+      .from("memoria")
+      .update({ perguntado, atualizado_em: agora })
+      .eq("id_conversa", idConversa)
+      .select("*")
+      .single();
+
+    return hidratar(data ?? { ...atual, perguntado, objecoes_identificadas: perguntado._objecoes });
+  }
+
+  /*
+    Guarda metadados da campanha (ex.: Botzapzap) separadamente da simulação financeira.
+    Campanha NUNCA vira simulação confiável sem confirmação/importação verificável.
+  */
+  async function guardarContextoCampanha(idConversa, contexto = {}) {
+    const atual = await garantir(idConversa);
+    if (!atual) return null;
+
+    const agora = new Date().toISOString();
+    const perguntado = {
+      ...(atual.perguntado ?? {}),
+      _contexto_campanha: {
+        ...(atual.contexto_campanha ?? {}),
+        ...contexto,
+        em: agora,
+      },
+    };
+
+    const { data } = await supabase
+      .from("memoria")
+      .update({ perguntado, atualizado_em: agora })
+      .eq("id_conversa", idConversa)
+      .select("*")
+      .single();
+
+    return hidratar(data ?? { ...atual, perguntado, contexto_campanha: perguntado._contexto_campanha });
   }
 
   /*
@@ -205,20 +423,48 @@ export function criarMemoria(supabase, userId) {
     Guardar o que VOCÊ disse não é deixar a IA inventar — é o contrário. É o
     que permite, depois, recusar tudo que não seja isto.
   */
-  async function guardarSimulacao(idConversa, { valor, parcela, taxa, de }) {
+  async function guardarSimulacao(
+    idConversa,
+    { valor, parcela, taxa, prazo, banco, de, idFonte = null, autorizadoPor = null, validadeDias = 7 } = {}
+  ) {
     if (de !== "consultor" && de !== "lista") {
       log.erro(`Recusei gravar simulação de origem "${de}". Só consultor ou lista.`);
       return await ler(idConversa);
     }
 
     const atual = await garantir(idConversa);
+    const agoraMs = Date.now();
+    const agoraIso = new Date(agoraMs).toISOString();
+    const expiraIso = new Date(agoraMs + Number(validadeDias || 7) * 24 * 60 * 60 * 1000).toISOString();
+
+    const anterior = atual?.simulacao ?? {};
+    const proximoValor = valor ?? anterior.valor ?? null;
+    const proximaParcela = parcela ?? anterior.parcela ?? null;
+    const proximaTaxa = taxa ?? anterior.taxa ?? null;
+    const proximoPrazo = prazo ?? anterior.prazo ?? null;
+    const proximoBanco = banco ?? anterior.banco ?? atual?.banco ?? null;
+
+    const camposAutorizados = [];
+    if (proximoValor) camposAutorizados.push("valor");
+    if (proximaParcela) camposAutorizados.push("parcela");
+    if (proximaTaxa) camposAutorizados.push("taxa");
+    if (proximoPrazo) camposAutorizados.push("prazo");
+    if (proximoBanco) camposAutorizados.push("banco");
+
     const simulacao = {
-      ...(atual?.simulacao ?? {}),
-      ...(valor ? { valor } : {}),
-      ...(parcela ? { parcela } : {}),
-      ...(taxa ? { taxa } : {}),
+      ...anterior,
+      ...(proximoValor ? { valor: proximoValor } : {}),
+      ...(proximaParcela ? { parcela: proximaParcela } : {}),
+      ...(proximaTaxa ? { taxa: proximaTaxa } : {}),
+      ...(proximoPrazo ? { prazo: proximoPrazo } : {}),
+      ...(proximoBanco ? { banco: proximoBanco } : {}),
       de,
-      em: new Date().toISOString(),
+      idFonte: idFonte ?? anterior.idFonte ?? null,
+      autorizadoPor: autorizadoPor ?? (de === "consultor" ? "consultor_humano" : "lista_verificada"),
+      em: agoraIso,
+      expiraEm: expiraIso,
+      valida: true,
+      camposAutorizados,
     };
 
     const { data } = await supabase
@@ -227,14 +473,14 @@ export function criarMemoria(supabase, userId) {
         simulacao,
         etapa_comercial: "documentos",
         aguardando: null,
-        atualizado_em: new Date().toISOString(),
+        atualizado_em: agoraIso,
       })
       .eq("id_conversa", idConversa)
       .select("*")
       .single();
 
     log.info(`   guardei a simulação que ${de === "lista" ? "veio da lista" : "você passou"}.`);
-    return data ?? atual;
+    return hidratar(data ?? { ...atual, simulacao });
   }
 
   /* Move a negociação. Quem move é o agente, olhando o que aconteceu. */
@@ -337,6 +583,20 @@ export function criarMemoria(supabase, userId) {
       .map(([k]) => REQUISITOS[k]?.rotulo ?? k);
     if (entregues.length) partes.push(`já mandou: ${entregues.join(", ")}`);
 
+    const recusasMapa = memoria.recusas ?? memoria.perguntado?._recusas ?? {};
+    const itensRecusados = Object.keys(recusasMapa)
+      .filter((k) => recusasMapa[k]?.recusado)
+      .map((k) => REQUISITOS[k]?.rotulo ?? k);
+    if (itensRecusados.length) {
+      partes.push(`recusou enviar (NÃO peça novamente): ${itensRecusados.join(", ")}`);
+    }
+
+    const ultimaPergunta =
+      memoria.ultima_pergunta_agente ?? memoria.perguntado?._ultima_pergunta_agente ?? null;
+    if (ultimaPergunta) {
+      partes.push(`última pergunta feita pelo agente: "${ultimaPergunta}"`);
+    }
+
     return partes.length ? `O que você já sabe deste cliente — ${partes.join(" · ")}.` : "";
   }
 
@@ -346,8 +606,13 @@ export function criarMemoria(supabase, userId) {
     aprender,
     aprenderDaAbordagem,
     guardarSimulacao,
+    guardarContextoCampanha,
     mudarEtapaComercial,
     registrarPergunta,
+    registrarUltimaPerguntaAgente,
+    registrarUltimaPerguntaCliente,
+    registrarRecusa,
+    registrarObjecao,
     confirmarPeloUltimoPedido,
     registrarAcao,
     extrairDaMensagem,

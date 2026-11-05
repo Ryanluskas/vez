@@ -8,6 +8,8 @@ import {
   calcularHashDadosBancarios,
 } from "../src/dossie/aprovacao.js";
 
+process.env.DOSSIE_HMAC_SECRET = "chave_exclusiva_de_teste_automatizado_hmac_sha256_segura_2026";
+
 test("Integridade Criptográfica: valida timingSafeEqual e detecta alteração de 1 caractere", () => {
   const agoraIso = new Date().toISOString();
   const params = {

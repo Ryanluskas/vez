@@ -23,7 +23,7 @@ export default async function PaginaDeConversas({
   const { data: conversasData } = await supabase
     .from("conversas")
     .select(
-      "id, telefone, nome, estagio, etapa, ultima_mensagem, atualizado_em, atender, seguir, followups_enviados, ultima_direcao, so_voce, qualificacao"
+      "id, telefone, nome, estagio, etapa, ultima_mensagem, atualizado_em, atender, seguir, followups_enviados, ultima_direcao, so_voce, qualificacao, opt_out, opt_out_em, motivo_opt_out, origem_contato, observacoes, motivo_perda"
     )
     .order("atualizado_em", { ascending: false })
     .limit(100);

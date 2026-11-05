@@ -1,20 +1,23 @@
 /*
   ============================================================================
-  PLAYBOOK DE CONTORNO DE OBJEÇÕES — CAPITALCRED
-  Técnicas de Persuasão Aplicadas a Refinanciamento de Consignado:
-  1. Ancoragem e Contraste (Taxa de 2,x% -> 1,40% a.m.)
-  2. Ressignificação do Atrito (Prazo 120 meses como chave de liberação)
-  3. Alternativa Ilusória (Fechamento com escolha forçada para documentos)
-  4. Honestidade Radical (Transparência no prazo e proteção antigolpe)
-  5. Isolamento de Objeção ("Vou pensar" / "Falar com a família")
+  CLASSIFICADOR E GUIA DE TRATAMENTO DE OBJEÇÕES — CAPITALCRED
+  Diretrizes consultivas, naturais e transparentes:
+  1. Distinção estrita entre reclamação grave/acusação de golpe (handoff imediato)
+     e dúvida objetiva de segurança (resposta informativa sem pressão).
+  2. Respeito imediato a recusas de documentos ou desinteresse.
+  3. Zero promessas universais de taxa/parcela sem simulação verificada.
+  4. Zero escolhas forçadas ou escassez artificial.
   ============================================================================
 */
 
 export const TIPOS_OBJECAO = {
   OPT_OUT_EXPLICITO: "opt_out_explicito",
+  RECLAMACAO_GRAVE: "reclamacao_grave",
+  AMEACA_DENUNCIA: "ameaca_denuncia",
   NAO_TEM_INTERESSE: "nao_tem_interesse",
   RECUSA_OFERTA: "recusa_oferta",
   GOLPE_SEGURANCA: "golpe_seguranca",
+  DUVIDA_SEGURANCA: "duvida_seguranca",
   NAO_ENVIA_DOCUMENTOS: "nao_envia_documentos",
   VOU_PENSAR: "vou_pensar",
   JA_TEM_CONSULTOR: "ja_tem_consultor",
@@ -26,70 +29,108 @@ export const TIPOS_OBJECAO = {
 
 export const PADROES_OBJECAO = [
   {
-    tipo: TIPOS_OBJECAO.RECUSA_OFERTA,
-    regex: /\b(?:taxa\s+(?:muito\s+)?alta|juros\s+alto|valor\s+(?:muito\s+)?baixo|parcela\s+(?:muito\s+)?cara|muito\s+tempo|prazo\s+longo|n[aã]o\s+gostei\s+da\s+proposta|voltar\s+(?:pra|para)\s+120|n[aã]o\s+quero\s+(?:voltar\s+(?:pra|para)\s+)?120(?:\s*meses)?|120\s+meses\s+[eé]\s+muito)\b/i,
-    estrategia: "Ressignificação do prazo e contraste de taxa. O prazo de 120 meses é a condição necessária para que a parcela não suba um centavo e o saldo seja liberado em conta.",
-    diretriz: 'Ressignifique o prazo de 120 meses como a chave que viabiliza o valor sem aumentar a parcela nem um centavo. Use a frase: "É trocar uma dívida cara por uma mais barata e ainda embolsar a diferença".',
-  },
-  {
-    tipo: TIPOS_OBJECAO.NAO_TEM_INTERESSE,
-    regex: /\b(?:n[aã]o\s+tenho\s+interesse|n[aã]o\s+quero(?:\s+agora)?|sem\s+interesse|agora\s+n[aã]o|deixa\s+pra\s+depois|n[aã]o\s+preciso|n[aã]o\s+quero\s+ver)\b/i,
-    estrategia: "Contorno persuasivo de desinteresse inicial. Não desista na primeira negativa: mostre a ancoragem do lucro do banco e parcela inalterada. Se o cliente insistir no não, pare para não perder tempo.",
-    diretriz: "Aplique persuasão imediata: 'Entendo perfeitamente! Só queria te mostrar porque hoje o banco tá ganhando muito em cima de você com essa taxa de 2,x%. A gente derruba pra 1,40% pra esse lucro voltar pro seu bolso agora, sem subir um centavo na parcela. Quer dar uma olhada sem compromisso?'. Se ele insistir que não quer, encerre na hora para não perder tempo.",
-  },
-  {
     tipo: TIPOS_OBJECAO.OPT_OUT_EXPLICITO,
+    gravidade: "critica",
+    exigeHandoffHumano: false,
     regex: /\b(?:pare\s+de\s+(?:me\s+)?mandar|n[aã]o\s+me\s+mande\s+mais|n[aã]o\s+me\s+chame\s+mais|remover?\s+(?:o\s+)?(?:meu\s+)?(?:n[uú]mero|contato)|descadastrar?|excluir?\s+(?:meus\s+dados|meu\s+n[uú]mero|meu\s+contato)|apagar?\s+meu\s+n[uú]mero|tirar\s+meu\s+n[uú]mero|sair\s+da\s+lista|bloquear\s+contatos?|opt[\s-]?out)\b/i,
     estrategia: "Conformidade LGPD estrita. Bloqueio imediato de novos disparos promocionais. Zero ofertas adicionais.",
-    diretriz: "Confirme o cancelamento com objetividade e respeito: 'Tudo bem, não te chamo mais. Obrigado pelo retorno!'",
+    diretriz: "Confirme o descadastramento com objetividade e respeito, sem tentar reverter.",
+  },
+  {
+    tipo: TIPOS_OBJECAO.AMEACA_DENUNCIA,
+    gravidade: "critica",
+    exigeHandoffHumano: true,
+    regex: /\b(?:denunciar|den[uú]ncia|pol[ií]cia|delegacia|boletim\s+de\s+ocorr[eê]ncia|fazer\s+(?:um\s+)?b\.?o\.?|procon|banco\s+central|bacen|processar|advogado|justi[cç]a)\b/i,
+    estrategia: "Interrupção imediata da abordagem comercial, redução total de pressão e escalonamento para responsável humano.",
+    diretriz: "Reconheça a gravidade sem discutir, informe que o atendimento automático está sendo encerrado e transfira imediatamente para o responsável humano.",
+  },
+  {
+    tipo: TIPOS_OBJECAO.RECLAMACAO_GRAVE,
+    gravidade: "critica",
+    exigeHandoffHumano: true,
+    regex: /\b(?:voc[eê]s\s+d[aã]o\s+golpes?|puro\s+golpe|s[aã]o\s+golpistas?|tentativa\s+de\s+golpe|fraude|estelionato|n[aã]o\s+confio\s+em\s+voc[eê]s|empresa\s+falsa|mentira\s+de\s+voc[eê]s)\b/i,
+    estrategia: "Desarme imediato de pressão comercial. Nunca responder acusação de golpe com pitch de vendas. Escalonar ao humano.",
+    diretriz: "Valide a cautela do cliente com calma, não tente vender nem pedir documentos, e encaminhe a conversa para revisão humana.",
   },
   {
     tipo: TIPOS_OBJECAO.GOLPE_SEGURANCA,
-    regex: /\b(?:golpe|seguro|fraude|confi[aá]vel|[eé]\s+verdade|voc[eê]s\s+s[aã]o\s+de\s+onde|qual\s+o\s+cnpj|onde\s+fica)\b/i,
-    estrategia: "Honestidade Radical e Autoridade. Validação da cautela do cliente, apresentação do CNPJ 53.093.082/0001-22 e garantia de que nunca pede senhas ou códigos.",
-    diretriz: "Valide a desconfiança ('É bom desconfiar mesmo'). Forneça o CNPJ oficial e reforce que a assinatura é feita diretamente pelo banco oficial com biometria facial.",
+    gravidade: "moderada",
+    exigeHandoffHumano: false,
+    regex: /\b(?:isso\s+[eé]\s+(?:um\s+)?golpe|qual\s+(?:[eé]\s+)?o\s+cnpj|voc[eê]s\s+s[aã]o\s+de\s+onde|onde\s+fica\s+a\s+empresa|[eé]\s+seguro\s+mesmo|como\s+sei\s+que\s+[eé]\s+seguro|tenho\s+medo\s+de\s+golpe|como\s+funciona\s+a\s+seguran[cç]a)\b/i,
+    estrategia: "Transparência verificável sem pressão comercial. Informar CNPJ oficial quando perguntado e explicar que nunca pedimos senhas ou valores adiantados.",
+    diretriz: "Responda de forma curta e verificável que nunca cobramos taxas antecipadas, nunca pedimos senhas e a formalização ocorre apenas no canal oficial do banco.",
   },
   {
     tipo: TIPOS_OBJECAO.NAO_ENVIA_DOCUMENTOS,
-    regex: /\b(?:n[aã]o\s+(?:vou\s+)?mandar\s+(?:foto|documento)|medo\s+de\s+mandar\s+documento|n[aã]o\s+passo\s+documento|por\s+que\s+precisa\s+do\s+documento)\b/i,
-    estrategia: "Alternativa Ilusória e Segurança. Explicar que o documento é exigência do banco para averbação antifraude e oferecer opções de envio.",
-    diretriz: "Pergunte com alternativa: 'Prefere me enviar a foto do RG agora ou prefere que eu te chame mais tarde/às 14h para tirar com calma?'",
+    gravidade: "alta",
+    exigeHandoffHumano: false,
+    regex: /\b(?:n[aã]o\s+(?:vou|quero)\s+(?:te\s+)?(?:mandar|enviar|passar)\s+(?:foto|documento|extrato|contracheque|rg|cnh|nada)|medo\s+de\s+mandar\s+documento|n[aã]o\s+passo\s+documento|n[aã]o\s+mando\s+(?:documento|extrato|foto)|por\s+que\s+precisa\s+do\s+documento)\b/i,
+    estrategia: "Respeito imediato à recusa documental. Explicar brevemente o motivo sem insistir no envio e oferecer auxílio humano.",
+    diretriz: "Respeite a recusa imediatamente, nunca repita o pedido do documento recusado e ofereça tirar dúvidas ou passar para o consultor.",
+  },
+  {
+    tipo: TIPOS_OBJECAO.RECUSA_OFERTA,
+    gravidade: "moderada",
+    exigeHandoffHumano: false,
+    regex: /\b(?:taxa\s+(?:muito\s+)?alta|juros\s+alto|valor\s+(?:muito\s+)?baixo|parcela\s+(?:muito\s+)?cara|muito\s+tempo|prazo\s+longo|n[aã]o\s+gostei\s+da\s+proposta|voltar\s+(?:pra|para)\s+120|n[aã]o\s+quero\s+(?:voltar\s+(?:pra|para)\s+)?120(?:\s*meses)?|120\s+meses\s+[eé]\s+muito)\b/i,
+    estrategia: "Escuta consultiva sobre a condição da proposta, oferecendo verificar alternativas com o consultor sem prometer números não verificados.",
+    diretriz: "Reconheça o ponto do cliente com transparência e pergunte se ele quer que o consultor verifique outra configuração possível ou prefere encerrar.",
+  },
+  {
+    tipo: TIPOS_OBJECAO.NAO_TEM_INTERESSE,
+    gravidade: "moderada",
+    exigeHandoffHumano: false,
+    regex: /\b(?:n[aã]o\s+tenho\s+interesse|n[aã]o\s+quero(?:\s+agora|\s+mesmo|\s+obrigad[oa])?|sem\s+interesse|agora\s+n[aã]o|deixa\s+pra\s+depois|n[aã]o\s+preciso|n[aã]o\s+quero\s+ver)\b/i,
+    estrategia: "Respeito à decisão do cliente. Sem insistência agressiva ou promessas de taxas sem simulação.",
+    diretriz: "Acolha a resposta com educação e pergunte de forma leve se prefere encerrar por aqui, encerrando imediatamente caso ele confirme.",
   },
   {
     tipo: TIPOS_OBJECAO.VOU_PENSAR,
+    gravidade: "baixa",
+    exigeHandoffHumano: false,
     regex: /\b(?:vou\s+pensar|deixa\s+eu\s+ver|depois\s+eu\s+vejo|vou\s+analisar|vou\s+dar\s+uma\s+pensada|preciso\s+pensar)\b/i,
-    estrategia: "Isolamento de Objeção. Identificar se a hesitação é sobre os números (valor, prazo, taxa) ou tempo de reflexão.",
-    diretriz: 'Isole a objeção antes de aceitar o adiamento: pergunte "Tirando isso, existe algo nos números (valor, prazo ou taxa) que não te agradou?". Só aceite o "vou pensar" após isolar a dúvida técnica.',
+    estrategia: "Respeitar o tempo de decisão do cliente e colocar-se à disposição para esclarecer dúvidas.",
+    diretriz: "Respeite o tempo de reflexão sem criar urgência artificial e pergunte apenas se ficou alguma dúvida que possa esclarecer.",
   },
   {
     tipo: TIPOS_OBJECAO.JA_TEM_CONSULTOR,
+    gravidade: "baixa",
+    exigeHandoffHumano: false,
     regex: /\b(?:j[aá]\s+tenho\s+(?:um\s+)?(?:consultor|gerente|banco|onde\s+fa[çc]o)|fa[çc]o\s+sempre\s+com\s+o\s+mesmo)\b/i,
-    estrategia: "Respeito à relação e benchmarking. Comparação da taxa de 1,40% a.m. sem compromisso.",
-    diretriz: "Parabenize pela confiança no parceiro atual e ofereça apenas comparar a taxa de 1,40% para ver se o banco dele cobre.",
+    estrategia: "Respeito ao relacionamento atual do cliente, deixando o canal aberto sem pressão.",
+    diretriz: "Valorize o fato de ele já ter alguém de confiança e deixe o canal aberto caso queira comparar condições no futuro.",
   },
   {
     tipo: TIPOS_OBJECAO.CONVERSAR_FAMILIA,
-    regex: /\b(?:falar|conversar|ver)\s+com\s+(?:minha\s+)?(?:esposa|marido|fam[ií]lia|filh[oa])\b/i,
-    estrategia: "Apoio e Isolamento. Validar que decisão de casa é sagrada e oferecer um resumo curto (valor, parcela e prazo) para conversarem.",
-    diretriz: 'Diga: "Claro! Mas me diga uma coisa: tirando a conversa com ela, os números (valor e taxa) ficaram bons para você? Se sim, te mando um resumo para facilitar a explicação para ela."',
+    gravidade: "baixa",
+    exigeHandoffHumano: false,
+    regex: /\b(?:falar|conversar|ver|consultar)\s+com\s+(?:a\s+|o\s+)?(?:minha\s+|meu\s+)?(?:esposa|marido|fam[ií]lia|filh[oa]|mulher)\b/i,
+    estrategia: "Apoiar a decisão em família sem pressionar pelo fechamento imediato e sem mudar de assunto.",
+    diretriz: "Valide a conversa com a família com naturalidade e ofereça deixar um resumo simples para avaliarem juntos com calma.",
   },
   {
     tipo: TIPOS_OBJECAO.ACORDO_FECHAMENTO,
+    gravidade: "baixa",
+    exigeHandoffHumano: false,
     regex: /\b(?:pode\s+(?:fazer|seguir|mandar|dar\s+andamento)|fechado|vamos\s+fazer|vamos\s+seguir|concordo|quero\s+sim|aceito|gostei(?:\s+da\s+proposta)?|pode\s+ser|t[aá]\s+bom|beleza\s+pode|vamos\s+nessa|pode\s+sim|quero\s+fazer|vamos\s+fechar|quero\s+fechar)\b/i,
-    estrategia: "Fechamento por Alternativa Ilusória (escolha forçada para envio de documento).",
-    diretriz: 'No momento de pedir documentos, apresente o checklist de 5 itens (documento com foto, comprovante de endereço, contracheque, extrato de margem e contratos Santander) e pergunte por alternativa ilusória: "Você prefere me mandar a foto do RG agora ou prefere que eu te chame daqui a pouco para tirar com calma?"',
+    estrategia: "Condução organizada da etapa de documentação, pedindo um item por vez de forma clara e sem escolha forçada.",
+    diretriz: "Confirme o andamento e solicite apenas o próximo documento pendente de forma simples e direta.",
   },
   {
     tipo: TIPOS_OBJECAO.CONFIRMACAO_DOCUMENTOS,
+    gravidade: "baixa",
+    exigeHandoffHumano: false,
     regex: /\b(?:s[oó]\s+isso(?:\s+mesmo)?|apenas\s+isso|precisa\s+de\s+mais\s+alguma\s+coisa|mais\s+nada)\b/i,
-    estrategia: "Confirmação objetiva dos 5 documentos e encorajamento para formalização.",
-    diretriz: "Confirme com segurança: 'Isso mesmo! Com esses 5 documentos na mão a gente confere tudo e dá entrada na sua liberação no Santander.'",
+    estrategia: "Confirmação clara do andamento da conferência documental.",
+    diretriz: "Confirme com tranquilidade que com a documentação conferida a proposta segue para análise e formalização no banco.",
   },
   {
     tipo: TIPOS_OBJECAO.NAO_ENTENDEU,
+    gravidade: "baixa",
+    exigeHandoffHumano: false,
     regex: /\b(?:n[aã]o\s+entendi|como\s+(?:assim|funciona\s+isso)|explica\s+melhor|t[aá]\s+confuso)\b/i,
-    estrategia: "Síntese em uma frase clara: parcela igual, taxa cai para 1,40% e a diferença cai na conta em dinheiro.",
-    diretriz: "Explique em termos práticos: 'Sua parcela mensal continua rigorosamente igual, seus juros caem para 1,40% e você recebe um dinheiro na conta.'",
+    estrategia: "Explicação simples em uma ou duas frases sobre a revisão de condições do contrato, sem prometer taxas ou valores não simulados.",
+    diretriz: "Explique de forma curta e clara o que está sendo verificado no contrato dele, sem inventar números.",
   },
 ];
 
@@ -105,6 +146,8 @@ export function identificarObjecao(texto) {
     if (item.regex.test(texto)) {
       return {
         tipo: item.tipo,
+        gravidade: item.gravidade || "moderada",
+        exigeHandoffHumano: Boolean(item.exigeHandoffHumano),
         estrategia: item.estrategia,
         diretriz: item.diretriz,
       };

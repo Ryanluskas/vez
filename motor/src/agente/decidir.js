@@ -85,12 +85,12 @@ export function decidir(retrato) {
     objecao = null,
   } = retrato ?? {};
 
-  /* ---- 1. Não é cliente ---- */
-  if (conversa.atender === false) {
+  /* ---- 1. Opt-out LGPD ou Contato Silenciado ---- */
+  if (conversa.opt_out === true || conversa.atender === false) {
     return {
       acao: ACOES.SILENCIAR,
       confianca: CONFIANCA.ESTADO,
-      motivo: "contato silenciado por você",
+      motivo: conversa.opt_out ? "contato em opt-out (LGPD)" : "contato silenciado por você",
     };
   }
 
@@ -99,7 +99,7 @@ export function decidir(retrato) {
     O freio de loop pegou aqui antes (ou você assumiu na mão). O bot grava
     e não decide mais nada nesta conversa até você devolver no painel.
   */
-  if (conversa.soVoce) {
+  if (conversa.soVoce || conversa.so_voce) {
     return {
       acao: ACOES.AGUARDAR,
       confianca: CONFIANCA.ESTADO,
@@ -107,40 +107,54 @@ export function decidir(retrato) {
     };
   }
 
-  /* ---- 1c. Contorno de Objeções Persuasivas ou Fechamento ---- */
   /*
-    Objeções e fechamento ganham prioridade máxima:
-    Se o cliente hesita, desiste ou desconfia, o bot DEVE persuadi-lo imediatamente,
-    mesmo que haja uma pendência de simulação em aberto na fila. Não deixar o cliente
-    esperando no vácuo ao apresentar uma objeção.
+    ---- 1c. Reclamação Grave, Acusação de Golpe ou Ameaça de Denúncia ----
+    Prioridade máxima de segurança: nunca responder acusação de golpe ou ameaça
+    com texto institucional longo ou tentativa de venda. Escala imediatamente
+    para o consultor humano e trava a conversa em modo manual.
   */
+  if (
+    objecao &&
+    (objecao.exigeHandoffHumano ||
+      objecao.tipo === "reclamacao_grave" ||
+      objecao.tipo === "ameaca_denuncia")
+  ) {
+    return {
+      acao: ACOES.PEDIR_AO_CONSULTOR,
+      confianca: CONFIANCA.REGRA,
+      motivo: `reclamação grave ou suspeita de fraude (${objecao.tipo}) — escalonamento imediato`,
+      categoria: "seguranca",
+      escalonamento: "seguranca",
+      assumirManual: true,
+      objecao,
+    };
+  }
+
+  /* ---- 1d. Tratamento Consultivo de Objeções e Aceite ---- */
   if (objecao) {
     if (objecao.tipo === "acordo_fechamento") {
-      const primeiroNomeCliente = memoria?.nome ? primeiroNome(memoria.nome) : "";
-      const saudacao = primeiroNomeCliente ? `Show, ${primeiroNomeCliente}, vamos dar entrada!` : "Show, vamos dar entrada!";
-      const textoFechamento =
-        `${saudacao} Para formalizar a liberação no Santander com segurança e emitir seu contrato digital, vou precisar desta documentação:\n\n` +
-        `• Documento com foto (RG ou CNH frente e verso)\n` +
-        `• Comprovante de endereço atualizado\n` +
-        `• Contracheque atualizado\n` +
-        `• Extrato de margem consignável\n` +
-        `• Número(s) do(s) contrato(s) do Santander que vamos refinanciar\n\n` +
-        `Você prefere me mandar a foto do documento agora ou prefere que eu te chame daqui a pouco para tirar com calma?`;
+      const pedidoFechamento = montarPedido(memoria, { para: "fechar" });
+      if (pedidoFechamento) {
+        return {
+          acao: ACOES.PERGUNTAR_CLIENTE,
+          confianca: CONFIANCA.REGRA,
+          motivo: `cliente aceitou proposta; solicitar próximo requisito (${pedidoFechamento.chaves.join(", ")})`,
+          pedido: pedidoFechamento,
+          categoria: "documentos",
+        };
+      }
 
       return {
-        acao: ACOES.PERGUNTAR_CLIENTE,
+        acao: ACOES.PEDIR_AO_CONSULTOR,
         confianca: CONFIANCA.REGRA,
-        motivo: "cliente aceitou proposta; solicitar checklist completo de documentos (5 itens) via alternativa ilusória",
-        pedido: {
-          texto: textoFechamento,
-          chaves: PARA_FECHAR,
-        },
+        motivo: "cliente aceitou proposta e requisitos iniciais já foram solicitados/coletados",
         categoria: "documentos",
+        escalonamento: "fechamento",
+        tudoColetado: prontoPara(memoria, { para: "fechar" }),
       };
     }
 
     if (objecao.tipo === "confirmacao_documentos") {
-      const primeiroNomeCliente = memoria?.nome ? primeiroNome(memoria.nome) : "";
       return {
         acao: ACOES.RESPONDER,
         confianca: CONFIANCA.REGRA,
@@ -156,17 +170,17 @@ export function decidir(retrato) {
         "vou_pensar",
         "conversar_familia",
         "golpe_seguranca",
+        "duvida_seguranca",
         "nao_envia_documentos",
         "ja_tem_consultor",
         "nao_entendeu",
         "nao_tem_interesse",
-        "confirmacao_documentos",
       ].includes(objecao.tipo)
     ) {
       return {
         acao: ACOES.RESPONDER,
         confianca: CONFIANCA.REGRA,
-        motivo: `contorno de objeção: ${objecao.tipo}`,
+        motivo: `tratamento consultivo de objeção: ${objecao.tipo}`,
         categoria: "objecao",
         objecao,
       };
@@ -307,13 +321,10 @@ export function decidir(retrato) {
 export const LIMIAR_ASSISTIDO = 0.8;
 
 export function podeAgirSozinho(decisao, { modo, categoriasLiberadas = [] }) {
-  // A categoria valor nunca sai sozinha, em modo nenhum. Quarta barreira.
-  if (decisao.categoria === "valor") return false;
+  // As categorias valor e seguranca nunca saem sozinhas, em modo nenhum.
+  if (decisao.categoria === "valor" || decisao.categoria === "seguranca") return false;
 
   if (modo === "manual") return false;
-
-  // Objeção comercial com contorno persuasivo validado sai automaticamente em modo autônomo
-  if (decisao.categoria === "objecao" && modo === "autonomo") return true;
 
   const liberada = categoriasLiberadas.includes(decisao.categoria);
   if (!liberada) return false;

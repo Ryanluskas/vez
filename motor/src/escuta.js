@@ -135,7 +135,7 @@ export function criarEscuta({ supabase, fluxo, maestro, userId, observador = obs
   async function enviar(rascunho) {
     let query = supabase
       .from("conversas")
-      .select("id, telefone, nome, id_conexao, id_chat")
+      .select("id, telefone, nome, id_conexao, id_chat, opt_out, atender")
       .eq("id", rascunho.id_conversa);
 
     if (userId) {
@@ -145,6 +145,16 @@ export function criarEscuta({ supabase, fluxo, maestro, userId, observador = obs
     const { data: conversa } = await query.maybeSingle();
 
     if (!conversa) throw new Error("rascunho aprovado sem conversa; pulei");
+
+    // Conformidade LGPD estrita no disparo: nunca envia mensagens para contato em opt-out (exceto a confirmação única de descadastramento)
+    if (conversa.opt_out === true && rascunho.categoria !== "opt_out") {
+      log.info(`[LGPD Opt-Out] Rascunho descartado na fila de envio para ${conversa.nome ?? conversa.telefone} (opt_out ativo).`);
+      await supabase
+        .from("rascunhos")
+        .update({ enviado_em: new Date().toISOString(), status: "descartado" })
+        .eq("id", rascunho.id);
+      return;
+    }
 
     // Filtro de Piloto Controlado: se for envio automático e o número não for autorizado, descarta
     if (rascunho.automatico && !telefoneAutorizadoNoPiloto(conversa.telefone)) {
@@ -375,11 +385,17 @@ export function criarEscuta({ supabase, fluxo, maestro, userId, observador = obs
   async function varrerPendenciasDemoradas() {
     const limite = new Date(Date.now() - DEMORA_QUE_MERECE_AVISO).toISOString();
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("pendencias")
       .select("id, id_conversa, criado_em")
       .eq("status", "aberta")
-      .lt("criado_em", limite)
+      .lt("criado_em", limite);
+
+    if (userId) {
+      query = query.eq("user_id", userId);
+    }
+
+    const { data, error } = await query
       .order("criado_em", { ascending: true })
       .limit(20);
 

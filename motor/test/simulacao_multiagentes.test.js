@@ -458,12 +458,15 @@ test("SIMULAÇÃO 1: Cliente Tranquilo (Fluxo fluido sem questionário, simulaç
   const t2 = await sim.enviarMensagemCliente("Beleza, fico no aguardo da simulação");
   assert.ok(t2.etapa !== "perdido", "Etapa não deve ser perdido");
 
-  // Turno 3: Cliente recebe proposta e aceita fechar
-  const t3 = await sim.enviarMensagemCliente("Gostei da taxa de 1,40% e da redução, quero fechar sim! Como faço?");
-  // Verificação 4: Bot pede documentos usando a alternativa ilusória
+  // Turno 3: Consultor respondeu ou fechou pendência e cliente aceita fechar
+  sim.sb.dados.pendencias.length = 0;
+  sim.conversa.etapa = "proposta_enviada";
+  sim.sb.dados.conversas.get(sim.conversa.id).etapa = "proposta_enviada";
+  const t3 = await sim.enviarMensagemCliente("Gostei da redução, quero fechar sim! Como faço?");
+  // Verificação 4: Bot pede próximo documento um por vez, sem escolha forçada
   assert.ok(
-    t3.respostasBot.some((r) => /foto\s+do\s+documento|agora\s+ou\s+prefere/i.test(r)),
-    "Bot deve solicitar documentos utilizando técnica da alternativa ilusória"
+    t3.respostasBot.some((r) => /contracheque|extrato|documento\s+com\s+foto/i.test(r)),
+    "Bot deve solicitar o próximo documento pendente"
   );
 
   // Turno 4: Cliente envia o documento
@@ -487,17 +490,17 @@ test("SIMULAÇÃO 2: Cliente Desconfiado (Objeção de golpe, CNPJ, segurança d
   // Turno 1: Cliente desconfia de golpe
   const t1 = await sim.enviarMensagemCliente("Boa tarde. Quem é você e de onde tirou meu número? Isso é golpe?");
   
-  // Verificação 1: Bot responde com transparência radical e dados oficiais
+  // Verificação 1: Bot responde com transparência e dados oficiais
   assert.ok(
-    t1.respostasBot.some((r) => /53\.093\.082\/0001-22|Capital\s*Cred|biometria\s+facial/i.test(r)),
+    t1.respostasBot.some((r) => /53\.093\.082\/0001-22|CapitalCred|biometria\s+facial|nunca\s+cobramos/i.test(r)),
     "Bot deve fornecer o CNPJ oficial e explicar formalização bancária segura"
   );
 
   // Turno 2: Cliente questiona por que precisa mandar documento pela internet
   const t2 = await sim.enviarMensagemCliente("Mas por que você precisa de foto do meu documento? Não passo documento pra estranho.");
   assert.ok(
-    t2.respostasBot.some((r) => /antifraude|averba[cç][aã]o|exig[eê]ncia\s+do\s+pr[oó]prio\s+banco/i.test(r)),
-    "Bot deve explicar a exigência regulatória do banco e usar alternativa ilusória"
+    t2.respostasBot.some((r) => /entendo\s+perfeitamente|conferir\s+sua\s+margem|tudo\s+bem/i.test(r)),
+    "Bot deve respeitar a recusa/receio documental sem pressionar"
   );
 
   // Turno 3: Cliente pergunta como funciona a parcela
@@ -525,24 +528,29 @@ test("SIMULAÇÃO 3: Cliente Chato (Reclama de 120 meses, desiste 'deixa pra lá
     "ERRO: Não deve perguntar convênio"
   );
 
+  // Simula resolução da pendência pelo consultor antes da objeção
+  sim.sb.dados.pendencias.length = 0;
+  sim.conversa.etapa = "proposta_enviada";
+  sim.sb.dados.conversas.get(sim.conversa.id).etapa = "proposta_enviada";
+
   // Turno 2: Cliente reclama do prazo
   const t2 = await sim.enviarMensagemCliente("120 meses é muito tempo! Vocês tão loucos? Não quero esse prazo longo.");
   assert.ok(
-    t2.respostasBot.some((r) => /120\s+meses|trocar\s+uma\s+d[ií]vida\s+cara\s+por\s+uma\s+barata|1,40%/i.test(r)),
-    "Bot deve aplicar o reframe comercial do prazo de 120 meses"
+    t2.respostasBot.some((r) => /prazo|condi[cç][aã]o|consultor|encerrar/i.test(r)),
+    "Bot deve responder de forma consultiva sobre o prazo sem inventar taxa"
   );
 
-  // Turno 3: Cliente diz 'Deixa, não quero mais fazer' (EXATO caso do print 2 do Ryan)
+  // Turno 3: Cliente diz 'Deixa, não quero mais fazer'
   const t3 = await sim.enviarMensagemCliente("Deixa, não quero mais fazer");
-  // Verificação 3: Bot NÃO deve desistir na primeira recusa! Deve persuadir com a taxa de 2,x% vs 1,40%
+  // Verificação 3: Bot respeita sem prometer 1,40% sem lastro
   assert.ok(
-    t3.respostasBot.some((r) => /2,x%|1,40%|lucro\s+voltar\s+pro\s+seu\s+bolso|sem\s+compromisso/i.test(r)),
-    "Bot deve insistir persuasivamente na primeira recusa sem desistir"
+    t3.respostasBot.some((r) => /tudo\s+bem|sem\s+problema|prefere\s+encerrar|respeito/i.test(r)),
+    "Bot deve acolher o desinteresse com respeito e sem promessa de taxa inventada"
   );
 
-  // Turno 4: Cliente abandona e depois retoma: 'Oi quero fazer dnv' (EXATO caso do print 3 do Ryan)
+  // Turno 4: Cliente abandona e depois retoma explicitamente: 'Oi quero fazer dnv'
   const t4 = await sim.enviarMensagemCliente("Oi quero fazer dnv");
-  // Verificação 4: Bot NÃO PODE IGNORAR! Deve reativar imediatamente
+  // Verificação 4: Bot reativa quando o cliente pede explicitamente para retomar
   assert.equal(t4.atender, true, "Conversa deve ser reativada (atender = true)");
   assert.equal(t4.soVoce, false, "so_voce deve ser false para permitir bot falar");
   assert.ok(t4.totalRespostas >= 1, "Bot NÃO pode ficar em silêncio quando o cliente retoma!");

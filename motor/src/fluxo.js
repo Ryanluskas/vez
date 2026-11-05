@@ -11,7 +11,13 @@ import { criarTravas } from "./travas.js";
 import { criarLista, comoNumero, comoDinheiro, calcularReducaoCapitalCred } from "./lista.js";
 import { numerosDeRisco } from "./numeros.js";
 import * as respostas from "./respostas.js";
-import { resolver, comoResponderSemTer, tirarOQueJaSei, oQueJaSei } from "./referencias.js";
+import {
+  resolver,
+  comoResponderSemTer,
+  tirarOQueJaSei,
+  oQueJaSei,
+  interpretarMensagemCurtaContextual,
+} from "./referencias.js";
 import { comoChamarAFonte, jaFoiDito } from "./valores.js";
 import { ehAbordagem, aceitouAAbordagem, primeiroNome } from "./abordagem.js";
 import { exemplosComBase } from "./estilo.js";
@@ -452,7 +458,7 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
       respostas.pedirOQueFalta(pedido, lembrado?.nome ?? nomeCliente) ??
       `Oi! Pra eu continuar, ${pedido.texto}.`;
 
-    await memoria.registrarPergunta(conversa.id, pedido.chaves);
+    await memoria.registrarPergunta(conversa.id, pedido.chaves, mensagem);
     await memoria.registrarAcao(
       conversa.id,
       "ask_customer",
@@ -1324,9 +1330,11 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
 
       const textoNormalizado = (texto || "").toLowerCase().trim();
 
-      // Padrão amplo de retomada de contato (inclui gírias, saudações, confirmações e erros comuns de digitação como "wuero")
-      const querRetomar =
-        /\b(?:quer[oa]|wuero|faz(?:er)?|volte?i|pode|mandar?|simula[cç]|dnv|de\s+novo|ajuda|ol[aá]|oi+|opa|cheguei|bora|vamos|bom\s+dia|boa\s+tarde|quanto\s+libera|libera|e\s+a[ií]|t[aá]\s+a[ií]|oi\?|sim|como\s+funciona|tudo\s+bem|quero\s+ver)\b/i.test(textoNormalizado);
+      // Padrão restrito de retomada explícita (não inclui saudações soltas como "oi" ou "bom dia")
+      const querRetomarExplicito =
+        /\b(?:quer[oa]\s+(?:faz(?:er)?|ver|simula|propost|atend|retom|volt|continuar)|wuero|volte?i(?:\s+a\s+ter\s+interesse)?|faz(?:er)?\s+dnv|de\s+novo|vamos\s+fazer|pode\s+fazer|bora\s+fazer|mudei\s+de\s+ideia|quero\s+sim)\b/i.test(
+          textoNormalizado
+        );
 
       // 0. Marco Temporal de Ativação: mensagens anteriores à ativação não acionam IA retroativamente
       const checagemTemporal = validarLimiteTemporalMensagem(
@@ -1346,24 +1354,22 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
       }
 
       // Enriquecimento com contexto de campanha do Botzapzap (se houver)
+      // IMPORTANTE: dados de campanha são salvos apenas como contexto de campanha, NUNCA como simulação financeira verificada.
       const contextoCampanha = buscarContextoCampanha(conversa.telefone);
       if (contextoCampanha && contextoCampanha.pertenceCampanha) {
         try {
           await memoria.garantir(conversa.id);
           const fatos = await memoria.ler(conversa.id);
-          if (contextoCampanha.cliente.nome && !fatos?.nome) {
-            await memoria.aprender(conversa.id, "nome", contextoCampanha.cliente.nome, "campanha_botzapzap");
+          if (contextoCampanha.cliente?.nome && !fatos?.nome) {
+            await memoria.aprender(conversa.id, { nome: contextoCampanha.cliente.nome });
           }
-          if (contextoCampanha.cliente.liberacaoEstimada && !fatos?.simulacao) {
-            await memoria.guardarSimulacao(conversa.id, {
-              valor: contextoCampanha.cliente.valorFmt || String(contextoCampanha.cliente.liberacaoEstimada),
-              taxa: "1,40%",
-              parcela: "sem aumento",
-              de: "campanha_botzapzap",
-            });
-          }
-        } catch {
-          // Falha não impeditiva
+          await memoria.guardarContextoCampanha(conversa.id, {
+            campanha: contextoCampanha.campanha,
+            cliente: contextoCampanha.cliente,
+            telefoneCampanha: contextoCampanha.telefoneCampanha,
+          });
+        } catch (err) {
+          log.alerta(`[Botzapzap] Falha ao enriquecer contexto de campanha: ${err.message}`);
         }
       }
 
@@ -1496,10 +1502,16 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
         conversa.etapa = "primeiro_atendimento";
       }
 
-      // Reativação de cliente silenciado, perdido ou assumido que retomou o contato (salvo se opt-out ativo)
-      if ((conversa.atender === false || conversa.etapa === "perdido" || conversa.so_voce === true) && !conversa.opt_out) {
-        if (querRetomar || conversa.so_voce === true || conversa.etapa === "perdido") {
-          log.destaque(`[Reativação] Cliente ${nomeCliente ?? conversa.telefone} retomou contato: liberando atendimento pelo bot.`);
+      // Se a conversa está sob controle exclusivo do consultor (so_voce === true), o bot NUNCA reativa sozinho
+      if (conversa.so_voce === true) {
+        log.info(`${nomeCliente ?? conversa.telefone} está sob atendimento humano exclusivo (so_voce). Só gravei.`);
+        return;
+      }
+
+      // Reativação de cliente silenciado ou perdido SOMENTE quando houver intenção explícita de retomar (e sem opt-out)
+      if ((conversa.atender === false || conversa.etapa === "perdido") && !conversa.opt_out) {
+        if (querRetomarExplicito) {
+          log.destaque(`[Reativação] Cliente ${nomeCliente ?? conversa.telefone} pediu explicitamente para retomar: liberando atendimento.`);
           await supabase
             .from("conversas")
             .update({
@@ -1516,8 +1528,8 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
           conversa.so_voce = false;
           conversa.etapa = "em_atendimento";
           conversa.motivo_perda = null;
-        } else if (conversa.atender === false) {
-          log.info(`${nomeCliente ?? "contato"} está silenciado. Só gravei.`);
+        } else {
+          log.info(`${nomeCliente ?? "contato"} está encerrado/silenciado e não pediu retomada explícita. Só gravei.`);
           return;
         }
       }
@@ -1590,6 +1602,92 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
         }
       }
 
+      if (texto && texto.includes("?")) {
+        lembrado = await memoria.registrarUltimaPerguntaCliente(conversa.id, texto);
+      }
+
+      /*
+        ================================================================
+        RESOLUÇÃO DE MENSAGENS CURTAS DEPENDENTES DE CONTEXTO
+        ("Não", "Oi?", "Que?", "Como assim?")
+        ================================================================
+      */
+      const contextoCurto = interpretarMensagemCurtaContextual(texto, lembrado, {
+        ...conversa,
+        temPendenciaAberta: temPendencia,
+      });
+
+      if (contextoCurto) {
+        if (contextoCurto.tipo === "recusa_contextual") {
+          lembrado = await memoria.registrarRecusa(conversa.id, contextoCurto.chaveRecusada, texto);
+          await memoria.registrarObjecao(conversa.id, "recusa_documento", texto);
+
+          const textoRecusa = respostas.conferido(
+            respostas.respostaRecusaContextual(
+              contextoCurto.rotuloRecusado,
+              lembrado?.nome ?? nomeCliente
+            )
+          );
+
+          if (textoRecusa) {
+            await abrirRascunho({
+              idConversa: conversa.id,
+              texto: textoRecusa,
+              categoria: "objecao",
+              origem: "bot",
+            });
+          }
+
+          await mandarProConsultor({
+            ciclo,
+            conversa,
+            nomeCliente,
+            lembrado,
+            pergunta: `Cliente recusou enviar ${contextoCurto.rotuloRecusado}: "${texto}"`,
+            motivo: `cliente recusou fornecer ${contextoCurto.rotuloRecusado}`,
+            categoria: "documentos",
+            avisar: false,
+          });
+          return;
+        }
+
+        if (contextoCurto.tipo === "pedido_esclarecimento" && !travada) {
+          const textoEsclarecimento = respostas.conferido(
+            respostas.respostaEsclarecimentoContextual(
+              contextoCurto,
+              lembrado?.nome ?? nomeCliente
+            )
+          );
+          if (textoEsclarecimento) {
+            await abrirRascunho({
+              idConversa: conversa.id,
+              texto: textoEsclarecimento,
+              categoria: "saudacao",
+              origem: "bot",
+            });
+            return;
+          }
+        }
+
+        if (contextoCurto.tipo === "cobranca_ou_oi_contextual") {
+          const textoCobranca = respostas.conferido(
+            respostas.respostaCobrancaContextual(
+              contextoCurto,
+              lembrado?.nome ?? nomeCliente
+            )
+          );
+          if (textoCobranca) {
+            await abrirRascunho({
+              idConversa: conversa.id,
+              texto: textoCobranca,
+              categoria: "saudacao",
+              origem: "bot",
+            });
+            return;
+          }
+        }
+      }
+
       /*
         ================================================================
         "EU JÁ SEI ISSO?" — ANTES DE PERGUNTAR QUALQUER COISA
@@ -1641,6 +1739,15 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
           detalhe: `objeção detectada: ${objecaoDetectada.tipo}`,
         });
 
+        if (objecaoDetectada.tipo === "nao_envia_documentos") {
+          lembrado = await memoria.registrarRecusa(conversa.id, null, texto);
+        }
+
+        const objecoesJaRegistradas = Array.isArray(lembrado?.objecoes_identificadas)
+          ? [...lembrado.objecoes_identificadas]
+          : [];
+        lembrado = await memoria.registrarObjecao(conversa.id, objecaoDetectada.tipo, texto);
+
         if (objecaoDetectada.tipo === "opt_out_explicito") {
           try {
             await supabase
@@ -1667,7 +1774,7 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
               .in("status", ["pendente", "aprovada"]);
           } catch {}
         } else {
-          // Se já contornamos uma objeção anteriormente e o cliente reiterou a recusa, encerra educadamente
+          // Se já tratamos uma objeção de desinteresse antes e o cliente reiterou a negativa, encerra educadamente
           try {
             const { data: objecoesAnteriores } = await supabase
               .from("rascunhos")
@@ -1675,19 +1782,28 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
               .eq("id_conversa", conversa.id)
               .eq("categoria", "objecao");
 
-            const jaPersuadiuRecusa = (objecoesAnteriores ?? []).some((r) =>
-              Boolean(r.texto_sugerido) &&
-              (/lucro\s+voltar\s+pro\s+seu\s+bolso/i.test(r.texto_sugerido) ||
-               /b[oó\u00f4]nus/i.test(r.texto_sugerido) ||
-               /menos\s+juros\s+pro\s+banco/i.test(r.texto_sugerido) ||
-               /economia/i.test(r.texto_sugerido))
+            const jaTinhaObjecaoNaMemoria = objecoesJaRegistradas.some(
+              (o) => o.tipo === "nao_tem_interesse" || o.tipo === "recusa_oferta"
             );
 
+            const jaRespondeuDesinteresse =
+              jaTinhaObjecaoNaMemoria ||
+              (objecoesAnteriores ?? []).some(
+                (r) =>
+                  Boolean(r.texto_sugerido) &&
+                  (/sem\s+compromisso/i.test(r.texto_sugerido) ||
+                    /prefere\s+que\s+eu\s+encerre/i.test(r.texto_sugerido) ||
+                    /lucro\s+voltar\s+pro\s+seu\s+bolso/i.test(r.texto_sugerido) ||
+                    /b[oó\u00f4]nus/i.test(r.texto_sugerido) ||
+                    /economia/i.test(r.texto_sugerido))
+              );
+
             if (
-              jaPersuadiuRecusa &&
-              (objecaoDetectada.tipo === "nao_tem_interesse" || /n[aã]o\s+quero\s+mesmo/i.test(texto))
+              jaRespondeuDesinteresse &&
+              (objecaoDetectada.tipo === "nao_tem_interesse" ||
+                /\b(?:n[aã]o\s+quero(?:\s+mesmo)?|pode\s+encerrar|encerrar)\b/i.test(texto))
             ) {
-              log.info(`[Persuasão] Cliente reiterou recusa após contorno anterior. Respeitando e encerrando.`);
+              log.info(`[Atendimento] Cliente reiterou desinteresse. Respeitando e encerrando.`);
               const agoraIso = new Date().toISOString();
               await supabase
                 .from("conversas")
@@ -1704,7 +1820,7 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
               conversa.etapa = "perdido";
 
               const encerramento =
-                "Perfeito, respeito sua decisão! Se precisar futuramente para reduzir parcelas ou liberar valores, estou à disposição. Obrigado pelo retorno!";
+                "Perfeito, respeito totalmente sua decisão! Vou encerrar por aqui. Se precisar no futuro, fico à disposição. Obrigado pelo retorno!";
               await abrirRascunho({
                 idConversa: conversa.id,
                 texto: encerramento,
@@ -1883,6 +1999,55 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
       }
 
       if (decisao.acao === ACOES.PEDIR_AO_CONSULTOR) {
+        // Caso crítico de segurança (acusação de golpe, ameaça de denúncia/polícia):
+        // Envia resposta curta de descompressão sem nenhum pitch comercial, trava a conversa em modo humano e abre pendência.
+        if (decisao.escalonamento === "seguranca") {
+          const respostaSeguranca = respostas.conferido(
+            respostas.respostaObjecao(
+              objecaoDetectada?.tipo ?? "reclamacao_grave",
+              lembrado?.nome ?? nomeCliente
+            )
+          );
+
+          if (respostaSeguranca) {
+            await abrirRascunho({
+              idConversa: conversa.id,
+              texto: respostaSeguranca,
+              categoria: "saudacao",
+              origem: "bot",
+            });
+          }
+
+          await supabase
+            .from("conversas")
+            .update({
+              so_voce: true,
+              seguir: false,
+              estagio: "aguardando_voce",
+              atualizado_em: new Date().toISOString(),
+            })
+            .eq("id", conversa.id);
+          conversa.so_voce = true;
+          conversa.seguir = false;
+
+          await mandarProConsultor({
+            ciclo,
+            conversa,
+            nomeCliente,
+            lembrado,
+            pergunta: `[ALERTA DE SEGURANÇA / RECLAMAÇÃO GRAVE] Cliente disse: "${texto}"`,
+            motivo: decisao.motivo,
+            categoria: "seguranca",
+            avisar: false,
+          });
+
+          observador.registrar(EVENTOS.HANDOFF, {
+            idConversa: conversa.id,
+            detalhe: "seguranca",
+          });
+          return;
+        }
+
         /*
           ================================================================
           ANTES DE TE CHAMAR, OLHA A LISTA
@@ -2286,26 +2451,28 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
       if (valorBruto > 0 && (pendencia.categoria === "valor" || /^(?:libera\s*)?r?\$?\s*\d+/i.test(respostaCrua))) {
         calculoReducao = calcularReducaoCapitalCred(valorBruto);
         propostaPadrao =
-          `${primeiroNomeCliente ? `${primeiroNomeCliente}, ` : ""}rodei sua simulação aqui no sistema. Conseguimos derrubar sua taxa de 2,x% para 1,40% ao mês pelo Santander, atualizando o prazo para 120 meses sem subir um centavo na sua parcela atual. Com essa redução, libera ${calculoReducao.clienteFormatado} líquido na sua conta hoje. Ficou bom pra você? Quer seguir com essa liberação?`;
+          `${primeiroNomeCliente ? `${primeiroNomeCliente}, ` : ""}conferi sua simulação aqui no sistema e o valor disponível para liberação é de ${calculoReducao.clienteFormatado}. Ficou bom pra você? Quer que eu te explique os próximos passos?`;
       }
 
       if (calculoReducao) {
         await memoria.guardarSimulacao(pendencia.id_conversa, {
+          valor: calculoReducao.clienteFormatado,
           valorTotal: calculoReducao.valorTotal,
           valorCliente: calculoReducao.cliente,
           valorEmpresa: calculoReducao.empresa,
           regra: calculoReducao.regra,
+          idFonte: pendencia.id ?? null,
           de: "consultor",
         });
       } else if (numeros.length) {
         await memoria.guardarSimulacao(pendencia.id_conversa, {
           valor: pendencia.resposta,
+          idFonte: pendencia.id ?? null,
           de: "consultor",
         });
       }
 
-      // Se o operador apenas digitou um número cru (ex: "7600", "Libera 7600"), NÃO manda a frase seca
-      // Usa a proposta persuasiva estruturada na regra CapitalCred (120 meses / 1,40% / valor líquido)
+      // Se o operador apenas digitou um número cru (ex: "7600", "Libera 7600"), apresenta o valor líquido calculado sem inventar taxas ou prazos não informados
       const ehNumeroSeco =
         /^(?:libera\s*)?r?\$?\s*\d+(?:[.,]\d+)?(?:\s*(?:reais|no\s*total))?$/i.test(respostaCrua) ||
         (numeros.length > 0 && respostaCrua.length < 30);
@@ -2314,11 +2481,6 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
         pendencia.resposta,
         pendencia.pergunta,
         manual,
-        "1,40",
-        "1.40",
-        "1,40%",
-        "120",
-        "120 meses",
       ];
       if (calculoReducao) {
         fontesPermitidas.push(

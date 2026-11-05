@@ -31,9 +31,13 @@ test("identificarObjecao detecta as principais objeções de crédito consignado
   assert.ok(o4);
   assert.equal(o4.tipo, TIPOS_OBJECAO.JA_TEM_CONSULTOR);
 
-  const o5 = identificarObjecao("Não tenho interesse, favor tirar meu número");
+  const o5 = identificarObjecao("Não tenho interesse no momento, obrigado");
   assert.ok(o5);
   assert.equal(o5.tipo, TIPOS_OBJECAO.NAO_TEM_INTERESSE);
+
+  const oOptOut = identificarObjecao("Não tenho interesse, favor tirar meu número");
+  assert.ok(oOptOut);
+  assert.equal(oOptOut.tipo, TIPOS_OBJECAO.OPT_OUT_EXPLICITO);
 
   const o6 = identificarObjecao("Vou conversar com minha esposa antes de fechar");
   assert.ok(o6);
@@ -129,7 +133,7 @@ test("3 Testes de Estresse de Persuasão: Prazo, Escudo e Fechamento", () => {
   const objPrazo = identificarObjecao("Não quero voltar para 120 meses");
   assert.ok(objPrazo);
   assert.equal(objPrazo.tipo, TIPOS_OBJECAO.RECUSA_OFERTA);
-  assert.ok(objPrazo.diretriz.includes("trocar uma dívida cara por uma mais barata"));
+  assert.ok(objPrazo.diretriz.includes("consultor verifique outra configuração"));
   const decPrazo = decidir({ conversa: {}, objecao: objPrazo });
   assert.equal(decPrazo.acao, ACOES.RESPONDER);
   assert.equal(decPrazo.categoria, "objecao");
@@ -138,36 +142,28 @@ test("3 Testes de Estresse de Persuasão: Prazo, Escudo e Fechamento", () => {
   const objEscudo = identificarObjecao("Vou pensar");
   assert.ok(objEscudo);
   assert.equal(objEscudo.tipo, TIPOS_OBJECAO.VOU_PENSAR);
-  assert.ok(objEscudo.diretriz.includes("Tirando isso, existe algo nos números"));
+  assert.ok(objEscudo.diretriz.includes("Respeite o tempo de reflexão"));
   const decEscudo = decidir({ conversa: {}, objecao: objEscudo });
   assert.equal(decEscudo.acao, ACOES.RESPONDER);
   assert.equal(decEscudo.categoria, "objecao");
 
-  // Teste 3: Teste do Fechamento ("Pode fazer" / "Fechado")
+  // Teste 3: Teste do Fechamento ("Pode fazer" / "Fechado") -> 1 requisito por vez, sem escolha forçada
   const objFechamento = identificarObjecao("Pode fazer, fechado!");
   assert.ok(objFechamento);
   assert.equal(objFechamento.tipo, TIPOS_OBJECAO.ACORDO_FECHAMENTO);
-  assert.ok(objFechamento.diretriz.includes("foto do RG agora ou prefere que eu te chame daqui a pouco"));
+  assert.ok(objFechamento.diretriz.includes("próximo documento pendente"));
   const decFechamento = decidir({ conversa: {}, objecao: objFechamento });
   assert.equal(decFechamento.acao, ACOES.PERGUNTAR_CLIENTE);
-  assert.ok(decFechamento.pedido.texto.includes("agora ou prefere que eu te chame daqui a pouco"));
-
-  // Validação do checklist completo de fechamento (5 documentos)
-  assert.ok(decFechamento.pedido.texto.includes("Documento com foto"));
-  assert.ok(decFechamento.pedido.texto.includes("Comprovante de endereço atualizado"));
-  assert.ok(decFechamento.pedido.texto.includes("Contracheque atualizado"));
-  assert.ok(decFechamento.pedido.texto.includes("Extrato de margem consignável"));
-  assert.ok(decFechamento.pedido.texto.includes("Número(s) do(s) contrato(s) do Santander"));
-  assert.equal(decFechamento.pedido.chaves.length, 5);
+  assert.equal(decFechamento.pedido.chaves.length, 1, "Deve pedir 1 item por vez");
+  assert.equal(/agora ou prefere/i.test(decFechamento.pedido.texto), false, "Não deve usar escolha forçada");
 
   // Validação das Diretrizes no Manual
   const manual = obterManualCapitalCred();
-  assert.ok(manual.includes("DIRETRIZES DE PERSUASÃO E FECHAMENTO"));
-  assert.ok(manual.includes("ANCORAGEM DE TAXA"));
-  assert.ok(manual.includes("RESSIGNIFICAÇÃO DO PRAZO"));
-  assert.ok(manual.includes("HONESTIDADE RADICAL"));
-  assert.ok(manual.includes("ISOLAMENTO DE OBJEÇÃO"));
-  assert.ok(manual.includes("FECHAMENTO POR ALTERNATIVA"));
+  assert.ok(manual.includes("DIRETRIZES DE ATENDIMENTO CONSULTIVO E TRANSPARÊNCIA"));
+  assert.ok(manual.includes("Escuta Ativa"));
+  assert.ok(manual.includes("Respeito à Recusa"));
+  assert.ok(manual.includes("Transparência de Segurança"));
+  assert.ok(manual.includes("Condução Natural de Documentos"));
 });
 
 test("Simulador CapitalCred: cálculo determinístico 62/38 (< R$ 8.000) e 50/50 (>= R$ 8.000)", async () => {

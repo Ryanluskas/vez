@@ -27,8 +27,11 @@ export class EvolutionProvider extends ProvedorWhatsAppBase {
   async iniciar() {
     this._definirEstado(ESTADOS_PROVEDOR.INICIANDO, `Conectando à Evolution API em ${this.serverUrl}`);
     try {
-      const estadoInstancia = await this.cliente.obterEstadoInstancia(this.instancia);
-      if (estadoInstancia && estadoInstancia.state === "open") {
+      const estadoBruto = this.cliente.obterEstadoConexao
+        ? await this.cliente.obterEstadoConexao({ nomeInstancia: this.instancia })
+        : await this.cliente.obterEstadoInstancia(this.instancia);
+      const state = typeof estadoBruto === "string" ? estadoBruto : estadoBruto?.state;
+      if (state === "open") {
         this._definirEstado(ESTADOS_PROVEDOR.CONECTADO, `Instância ${this.instancia} conectada (open)`);
       } else {
         this._definirEstado(ESTADOS_PROVEDOR.AGUARDANDO_QR, `Instância ${this.instancia} aguardando conexão/QR`);
@@ -45,8 +48,13 @@ export class EvolutionProvider extends ProvedorWhatsAppBase {
 
   async enviarTexto(telefoneOuJid, texto, opcoes = {}) {
     try {
-      const resposta = await this.cliente.enviarTexto(this.instancia, telefoneOuJid, texto, opcoes);
-      return { ok: true, idMensagem: resposta?.key?.id || null };
+      const resposta = await this.cliente.enviarTexto({
+        nomeInstancia: this.instancia,
+        numero: telefoneOuJid,
+        texto,
+        quoted: opcoes?.quoted || null,
+      });
+      return { ok: true, idMensagem: resposta?.keyId || resposta?.key?.id || null };
     } catch (erro) {
       log.erro(`[EvolutionProvider] Erro ao enviar mensagem para ${telefoneOuJid}: ${erro.message}`);
       return { ok: false, erro: erro.message };

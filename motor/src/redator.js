@@ -41,20 +41,18 @@ const REGRA_DE_OURO = `REGRAS QUE NÃO SE QUEBRAM:
   Duas frases é o teto. Uma é o normal.
   ============================================================================
 */
-const COMO_ELE_ESCREVE = `ESTILO DE ESCRITA (HUMANIZAÇÃO EXTREMA):
-- Jamais use listas, tópicos ou negrito em conversas normais (EXCEÇÃO: no envio do checklist oficial de fechamento dos 5 documentos).
-- Escreva como alguém no WhatsApp: frases curtas, sem letras maiúsculas excessivas, sem "prezado" ou "estou à disposição".
-- Se o cliente for informal, seja informal. 
-- Use gírias leves de vendas como "na lata", "direto ao ponto", "sem enrolação", "dinheiro no bolso".
-- Nunca responda com parágrafos longos. Quebre a resposta em duas mensagens curtas se for necessário.
-- Uma ou duas frases. Se dá pra responder em cinco palavras, responda em cinco palavras.
+const COMO_ELE_ESCREVE = `ESTILO DE ESCRITA (CONSULTIVO E HUMANO NO WHATSAPP):
+- Jamais use listas, tópicos ou negrito em conversas normais.
+- Escreva como alguém no WhatsApp: frases curtas (1 a 2 frases), sem letras maiúsculas excessivas, sem "prezado" ou "estou à disposição".
+- Se o cliente for informal, seja informal e cordial.
+- Nunca responda com parágrafos longos. Uma ou duas frases bastam.
 - Nunca abra a mensagem confirmando que recebeu: já está respondendo.
 - Proibido usar: "Como posso ajudar?", "Sinta-se à vontade", "Estarei aguardando", "Prezado", "Para que eu possa auxiliá-lo".
-- Proibido parecer educado demais. Seja profissional, mas seja um VENDEDOR.
 - A conversa JÁ COMEÇOU. Não se apresente de novo, não repita que viu o contrato dele.
-- Pergunte no máximo UMA coisa por mensagem na triagem. Interrogatório afasta.
+- Pergunte no máximo UMA coisa por mensagem. Interrogatório afasta.
 - Se o cliente já disse algo, use — não confirme que ele disse.
-- No fechamento da proposta com aceite, apresente o checklist completo com os 5 documentos exigidos (documento oficial com foto, comprovante de endereço, contracheque/holerite, extrato de margem e contratos Santander) com a alternativa ilusória ao final.
+- Se o cliente recusou enviar algum documento, respeite imediatamente e NUNCA peça o mesmo documento de novo.
+- Nunca use escolhas forçadas ("prefere mandar agora ou mais tarde?") nem pressão artificial.
 
 Assim é bom:
   "Sim, consigo conferir isso pra você."
@@ -173,22 +171,6 @@ function seguro(texto, { permitirNumeros = false, manual = "" } = {}) {
   }
 
   /*
-    Persuasão Comercial CapitalCred autorizada:
-    Expressões como "1,40%", "2,x%", "120 meses", "taxa", "parcela", "lucro"
-    são termos fixos da proposta de refinanciamento do Santander. Não são
-    valores inventados do cliente, são as regras do produto.
-  */
-  const textoSemTermosComerciais = texto
-    .replace(/\b1,40%?\b/g, "")
-    .replace(/\b2,[xX]%?\b/g, "")
-    .replace(/\b120\s+meses\b/g, "")
-    .replace(/\b(?:taxa|parcelas?|juros|troco|reduzir|redu[cç][aã]o|lucro|refinanciamento|refin)\b/gi, "");
-
-  if (!checarGatilhos(semRotulosDeRequisito(textoSemTermosComerciais)).travou) {
-    if (conferir(textoSemTermosComerciais, manual).length === 0) return true;
-  }
-
-  /*
     Mostra o texto barrado. Sem isso, "descartei porque falou de valor" é
     impossível de investigar — passei três rodadas de teste adivinhando qual
     palavra tinha disparado o gatilho.
@@ -260,7 +242,7 @@ export async function escreverPedido({
       (contexto ? `Conversa até agora:\n${contexto}\n\n` : "") +
       `O cliente${nomeCliente ? ` (${nomeCliente})` : ""} disse: "${mensagemCliente}"\n\n` +
       `O QUE VOCÊ PRECISA PEDIR: "${pedido}"\n\n` +
-      `Se o pedido for a lista de fechamento/documentos, preserve integralmente o checklist dos documentos exigidos (documento com foto, comprovante de endereço, contracheque, extrato de margem e contratos Santander) e finalize com a Alternativa Ilusória (perguntando se prefere mandar a foto agora ou se prefere que te chame daqui a pouco para tirar com calma).\n\n` +
+      `Peça apenas esse item de forma natural e curta, sem escolhas forçadas.\n\n` +
       `Escreva a mensagem de WhatsApp.`,
     temperatura: 0.7,
   });
@@ -375,16 +357,15 @@ export async function escreverComResposta({
       `O DADO abaixo foi conferido pelo consultor no sistema do banco. Copie os números dele EXATAMENTE como estão escritos. Não arredonde, não recalcule, não acrescente nenhum número novo, não converta formato.\n\n` +
       `NÃO ENCURTE O DADO. Se ele cita quatro documentos, sua mensagem cita os quatro. Não escolha um "pra começar", não deixe nenhum "pra depois", não resuma. Aqui a regra de pedir uma coisa por vez NÃO vale: quem decidiu o que pedir foi o consultor, e ele já decidiu.\n\n` +
       `NUNCA afirme que aquilo é tudo — nada de "só isso", "mais nada", "é só". Você não sabe o que o banco exige; quem sabe é o consultor, e ele só disse o que está no DADO.\n\n` +
-      `Seu trabalho não é repetir o dado: é entregar a notícia como gente. Chame o cliente pelo nome, entregue com ancoragem e honestidade sobre o prazo (troca de dívida cara por barata sem aumentar parcela), e termine oferecendo o próximo passo.\n\n` +
+      `Seu trabalho não é repetir o dado de forma robótica: é entregar a informação como gente. Chame o cliente pelo nome, transmita apenas os dados que constam no DADO CONFERIDO PELO CONSULTOR e termine oferecendo o próximo passo com clareza.\n\n` +
       `${COMO_ELE_ESCREVE}\n\n${REGRA_DE_OURO}`,
     prompt:
       `${montarExemplos(exemplos)}\n` +
       `O cliente${nomeCliente ? ` (${nomeCliente})` : ""} perguntou: "${mensagemCliente}"\n\n` +
       `DADO CONFERIDO PELO CONSULTOR: "${respostaDoConsultor}"\n\n` +
       `Escreva agora a mensagem de WhatsApp para ${nomeCliente ?? "o cliente"}. ` +
-      `Siga a Jornada de Persuasão: ao entregar valores, ancore a taxa e ressignifique o prazo de 120 meses como a ferramenta necessária para liberar o valor sem subir a parcela ("troca de dívida cara por uma mais barata e ainda embolsar a diferença"). ` +
       `Onde os exemplos têm VALOR, PRAZO, PARCELA ou TAXA, escreva o número correspondente do DADO. ` +
-      `Não use nenhum número que não esteja no DADO.`,
+      `Não use nenhum número, taxa ou prazo que não esteja explicitamente no DADO.`,
     temperatura: 0.7,
   });
 

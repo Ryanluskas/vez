@@ -1,7 +1,7 @@
 import { ACOES } from "./decidir.js";
 import { checarGatilhos } from "../gatilhos.js";
 import { conferir, numerosDeRisco, sobrouMarcador } from "../numeros.js";
-import { REQUISITOS, semRotulosDeRequisito } from "../requisitos.js";
+import { REQUISITOS, semRotulosDeRequisito, foiRecusado } from "../requisitos.js";
 
 /*
   ============================================================================
@@ -372,6 +372,49 @@ export function repergunta(texto, memoria) {
   return null;
 }
 
+/*
+  Verifica se o texto tenta pedir novamente um requisito que o cliente já recusou enviar.
+*/
+export function insisteEmItemRecusado(texto, memoria) {
+  if (!memoria || !texto) return null;
+  const pedeEnvio = /\b(?:me\s+manda|manda\s+pra\s+mim|envia|enviar|preciso\s+d[eo]|mandar\s+(?:a\s+foto|o\s+extrato|o\s+documento|o\s+contracheque|o\s+comprovante))\b/i.test(
+    texto
+  );
+  if (!pedeEnvio && !/\?/.test(texto)) return null;
+
+  // Se o texto afirma explicitamente que NÃO vai pedir, permite
+  if (/\bn[aã]o\s+vou\s+(?:te\s+)?(?:pedir|insistir)/i.test(texto)) return null;
+
+  for (const [chave, pista] of Object.entries(PISTAS)) {
+    if (!foiRecusado(memoria, chave)) continue;
+    if (pista.test(texto)) {
+      return REQUISITOS[chave]?.rotulo ?? chave;
+    }
+  }
+  return null;
+}
+
+/*
+  Verifica promessas financeiras sem lastro explícito nas fontes permitidas
+  (ex.: prometer que a parcela não sobe um centavo ou que já está aprovado sem o consultor ter dito isso).
+*/
+const PROMESSAS_SEM_LASTRO = [
+  [/\bsem\s+(?:subir|aumentar)\s+(?:um\s+centavo|nada)\s+na\s+(?:sua\s+)?parcela\b/i, "prometeu manutenção de parcela sem confirmação na fonte"],
+  [/\bparcela\s+continua\s+rigorosamente\s+igual\b/i, "prometeu parcela igual sem confirmação na fonte"],
+  [/\bj[aá]\s+est[aá]\s+aprovad[oa]\s+e\s+reservad[oa]\b/i, "prometeu aprovação/reserva sem confirmação na fonte"],
+];
+
+export function promessaFinanceiraSemLastro(texto, fontesPermitidas = []) {
+  if (!texto) return null;
+  const fontesConcatenadas = fontesPermitidas.filter(Boolean).join(" \n ").toLowerCase();
+  for (const [padrao, motivo] of PROMESSAS_SEM_LASTRO) {
+    if (padrao.test(texto) && !padrao.test(fontesConcatenadas)) {
+      return motivo;
+    }
+  }
+  return null;
+}
+
 /* ------------------------------------------------------------------
    A última porta
 ------------------------------------------------------------------ */
@@ -396,6 +439,16 @@ export function validarAntesDeEnviar(texto, contexto = {}) {
     contextoDaConversa = "",
     mensagemCliente = "",
   } = contexto;
+
+  /* 0. Bloqueio absoluto se o cliente estiver em opt-out (exceto confirmação única de opt-out). */
+  if (contexto.conversa?.opt_out === true && contexto.categoria !== "opt_out") {
+    return {
+      ok: false,
+      codigo: "opt_out_ativo",
+      motivo: "contato em opt-out não pode receber mensagens automáticas",
+      paraOConsultor: false,
+    };
+  }
 
   /* 1. O básico: vazio, curto, "não sei", marcador, número inventado. */
   const basico = validarTexto(texto, { permitirNumeros, fontesPermitidas });
@@ -458,6 +511,28 @@ export function validarAntesDeEnviar(texto, contexto = {}) {
       codigo: "repergunta",
       motivo: `ia perguntar de novo por ${repetida}, que o cliente já disse`,
       paraOConsultor: false,
+    };
+  }
+
+  /* 5b. Insiste em item que o cliente já recusou enviar. */
+  const recusado = insisteEmItemRecusado(texto, memoria);
+  if (recusado) {
+    return {
+      ok: false,
+      codigo: "item_recusado",
+      motivo: `ia pedir novamente ${recusado}, que o cliente já recusou enviar`,
+      paraOConsultor: true,
+    };
+  }
+
+  /* 5c. Promessa financeira sem lastro nas fontes autorizadas. */
+  const promessaSemBase = promessaFinanceiraSemLastro(texto, fontesPermitidas);
+  if (promessaSemBase) {
+    return {
+      ok: false,
+      codigo: "promessa_sem_lastro",
+      motivo: promessaSemBase,
+      paraOConsultor: true,
     };
   }
 

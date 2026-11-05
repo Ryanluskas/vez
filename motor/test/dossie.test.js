@@ -156,6 +156,7 @@ test("aprovação estrita bloqueia envio ao grupo sem autorização humana expre
   );
 
   // Operação aprovada com hash válido
+  process.env.DOSSIE_HMAC_SECRET = "chave_exclusiva_de_teste_automatizado_hmac_sha256_segura_2026";
   const idOp = "dossie-uuid-123";
   const codOp = "VEZ-2026-000002";
   const txt = "Texto padronizado correntista Santander com mais de cinquenta caracteres para validação completa.";
@@ -210,6 +211,7 @@ test("aprovação estrita bloqueia envio ao grupo sem autorização humana expre
     operacao: opAprovada,
     grupoDestinoJid: "1203630456789@g.us",
     clienteTelefone: "5562999998888",
+    instanciaEvolution: "instancia_teste",
     clienteEvolution: mockEvolution,
   });
 

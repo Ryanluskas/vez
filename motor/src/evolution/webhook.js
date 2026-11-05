@@ -256,8 +256,6 @@ export function criarServidorWebhook({
               if (calculo && calculo.cliente > 0) {
                 await fluxo.memoria.guardarSimulacao(conversa.id, {
                   valor: calculo.clienteFormatado,
-                  taxa: "1,40%",
-                  parcela: "sem aumento",
                   de: "consultor",
                 });
                 log.destaque(
@@ -277,11 +275,11 @@ export function criarServidorWebhook({
                     .eq("status", "aberta");
                 } catch {}
 
-                // Envia a proposta oficial estruturada ao cliente para não deixar apenas o número cru
+                // Envia a proposta com o valor apurado pelo consultor sem inventar condições não informadas
                 try {
                   const primeiroNomeCliente = conversa.nome ? conversa.nome.trim().split(/\s+/)[0] : "";
                   const saudacao = primeiroNomeCliente ? `${primeiroNomeCliente}, ` : "";
-                  const propostaOficial = `${saudacao}rodei sua simulação aqui no sistema do Santander. Conseguimos liberar ${calculo.clienteFormatado} líquido na sua conta hoje, mantendo sua parcela exatamente igual sem subir um centavo! Ficou bom para você? Quer dar entrada?`;
+                  const propostaOficial = `${saudacao}conferi sua simulação aqui no sistema e o valor disponível para liberação é de ${calculo.clienteFormatado}. Ficou bom para você? Quer seguir com essa proposta?`;
 
                   await fluxo.abrirRascunho({
                     idConversa: conversa.id,
