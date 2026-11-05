@@ -81,7 +81,7 @@ const APONTAM_PARA = [
   /* Ele contesta ter sido perguntado. */
   [
     "contesta_pedido",
-    /\b(?:mas\s+)?voc[eê]\s+(?:nem|nao|n[aã]o)\s+(?:pediu|perguntou|falou)\b|\bpor\s*qu[eê]\?*\s*$|\bmas\s+por\s*qu[eê]/,
+    /\b(?:mas\s+)?voc[eê]\s+(?:nem|nao|n[aã]o)\s+(?:pediu|perguntou|falou)\b|^(?:mas\s+)?por\s*qu[eê]\??$/i,
   ],
 ];
 

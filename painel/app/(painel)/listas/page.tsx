@@ -62,7 +62,7 @@ export default async function PaginaDeListas() {
       <SubirLista />
 
       {todas.length > 0 ? (
-        <div className="mt-6 border-b border-fio">
+        <div className="mt-6 space-y-3">
           {todas.map((l) => (
             <CartaoDaLista key={l.id} lista={l} />
           ))}

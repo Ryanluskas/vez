@@ -1,21 +1,22 @@
 import type { Metadata, Viewport } from "next";
-import { Bricolage_Grotesque, Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
-/* Display: so no wordmark e nos titulos de tela. Apertado e pesado, nunca solto. */
-const display = Bricolage_Grotesque({
+/* Display Apple: peso consistente, tracking negativo refinado, sem serifas cartunescas. */
+const display = Geist({
   variable: "--fonte-display",
   subsets: ["latin"],
-  weight: ["600", "700"],
+  weight: ["500", "600", "700"],
 });
 
-/* Interface. */
+/* Interface geral. */
 const sans = Geist({
   variable: "--fonte-sans",
   subsets: ["latin"],
+  weight: ["400", "500", "600"],
 });
 
-/* Todo numero do produto: relogio de espera, telefone, contador. */
+/* Numeros tabulares e identificadores. */
 const mono = Geist_Mono({
   variable: "--fonte-mono",
   subsets: ["latin"],
@@ -53,7 +54,7 @@ export default function RootLayout({
   return (
     <html
       lang="pt-BR"
-      data-tema="escuro"
+      data-tema="claro"
       /* O script acima troca este atributo antes do React montar. Sem isto,
          o React reclama que o servidor e o cliente discordam — e discordam
          mesmo, de proposito. Aqui o DOM ganha. */

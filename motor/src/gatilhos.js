@@ -74,6 +74,10 @@ const VERBO_DE_DINHEIRO =
 
 const GATILHOS = [
   {
+    motivo: "pediu atendimento humano",
+    padrao: /\b(falar\s+com\s+(?:um\s+)?(?:humano|atendente|consultor|gerente|pessoa)|atendente\s+humano|pessoa\s+de\s+verdade|atendimento\s+humano|passa\s+pra\s+algu[eé]m)\b/,
+  },
+  {
     motivo: "perguntou quanto libera",
     padrao: new RegExp(`\\b${QUANTO}\\b[^?.!]{0,40}\\b${VERBO_DE_DINHEIRO}\\b`),
   },

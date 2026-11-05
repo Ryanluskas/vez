@@ -147,9 +147,71 @@ de novo sem quebrar nada. Separados, nesta ordem:
 | `18_observabilidade.sql` | Diário do agente, batimento do motor, métricas |
 | `19_listas.sql` | Listas de clientes, campos liberados, porcentagem |
 | `20_estado_comercial.sql` | Etapa da negociação, origem, simulação já passada |
+| `21_pendencia_concluida.sql` | Estado concluído de pendências |
+| `22_evolution_e_followups.sql` | Evolution API, fila de follow-ups supervisionados e telemetria multiprovedor de IA |
 
 O `02` é o que isola os dados de cada consultor: a consulta no fim dele tem que mostrar
 `rls_ligado = true` e 4 políticas por tabela.
+
+## Infraestrutura Docker — Evolution API v2
+
+O Vez utiliza a **Evolution API v2** desacoplada em contêineres Docker para alta estabilidade de conexão WhatsApp, sem travamentos de navegador local:
+
+```bash
+# 1. Copie o arquivo de variáveis de ambiente
+cp .env.evolution.example .env.evolution
+
+# 2. Inicie a infraestrutura da Evolution API (PostgreSQL isolado na 5433, Redis na 6380, Evolution na 8080)
+docker compose up -d
+```
+
+> **Atenção:** O PostgreSQL da Evolution roda na porta `5433` e é exclusivo da API de mensageria. Ele nunca se confunde com o Supabase, que permanece o repositório central dos dados de negócio, memória e segurança do Vez.
+
+### Variáveis da Evolution API no Motor
+
+No seu `motor/.env`:
+```env
+VEZ_GATEWAY=evolution
+EVOLUTION_SERVER_URL=http://localhost:8080
+EVOLUTION_APIKEY=sua_chave_global_da_evolution
+VEZ_WEBHOOK_PORT=3333
+VEZ_WEBHOOK_SECRET=token_secreto_para_validar_webhooks
+```
+
+## Arquitetura Multiprovedor de IA
+
+O Vez não é preso a um único provedor. O sistema possui adaptadores independentes para:
+- **Google Gemini** (`gemini-2.5-flash`, `gemini-2.5-pro`)
+- **OpenAI** (`gpt-4o`, `gpt-4o-mini`)
+- **Anthropic Claude** (`claude-3-5-sonnet-latest`, `claude-3-5-haiku-latest`)
+- **Groq** (`llama-3.3-70b-versatile`)
+- **Ollama** (`llama3.2:3b` local)
+
+### Fallback Inteligente e Auditoria de Custos
+Quando o modelo primário atinge limite de requisição (429) ou sofre timeout de rede, o orquestrador aciona automaticamente o modelo secundário configurado, preservando o contexto da conversa. Todas as chamadas geram telemetria na tabela `consumo_ia`, permitindo visualizar latência e custo em tempo real no Painel em `/ia`.
+
+## Inteligência Comercial — CapitalCred
+
+O motor incorpora o playbook comercial da **CapitalCred Consultoria Financeira**:
+- **Metodologia SPIN Selling:** Identifica o objetivo do cliente (troco, redução de parcela, quitação de dívida mais cara) e conduz perguntas situacionais mínimas sem sobrecarregar o cliente.
+- **Tratamento de Objeções:** Detecção automática e aplicação de táticas calibradas (Chris Voss) para 7 principais objeções de crédito consignado:
+  1. Golpe / Segurança da empresa (apresenta CNPJ e biometria oficial do banco parceiro)
+  2. Receio de enviar foto de documento
+  3. "Vou pensar / depois vejo"
+  4. "Já tenho consultor de confiança"
+  5. Desinteresse declarado / Pedido de opt-out (LGPD)
+  6. Conversar com a família / cônjuge
+  7. Dúvidas sobre o funcionamento da portabilidade
+- **Qualificação de Leads:** Classificação contínua da temperatura do lead (`fria`, `morna`, `quente`, `desqualificada`).
+
+## Follow-up Supervisionado (Aprovação Humana Obrigatória)
+
+**Princípio Fundamental:** Nenhum follow-up externo sai para o WhatsApp sem autorização de um consultor humano.
+1. O motor identifica conversas inativas no horário comercial (8h às 20h) e redige uma sugestão contextual de acompanhamento sem inventar números.
+2. A sugestão entra na fila de aprovação no Painel em `/followups`.
+3. O consultor lê, ajusta o texto se quiser, e aprova com 1 clique (ou descarta).
+4. O motor despacha a mensagem aprovada e registra o envio oficial.
+5. Se o cliente responder à conversa antes do disparo, a solicitação é cancelada automaticamente pelo sistema, evitando mensagens fora de hora.
 
 ## Os três modos
 
@@ -168,9 +230,7 @@ então deixa passar o que o código decidiu e segura o que dependeu de palpite.
 
 Em **modo nenhum** a categoria `valor` sai sozinha.
 
-O follow-up é a exceção histórica: sai sem aprovação em qualquer modo, porque um
-lembrete que espera aprovação vira mais uma tarefa na pilha — ou seja, não acontece. O
-que protege isso é o texto ser fixo, escrito à mão, sem número e sem IA no meio.
+**Supervisão em Follow-ups:** Mesmo em modo autônomo, mensagens de reativação e cobrança de clientes inativos (follow-up) passam obrigatoriamente pela fila de aprovação humana no Painel, com sugestão pré-formatada pela IA e 1 clique para aprovar.
 
 ## Quem pensa e quem escreve
 

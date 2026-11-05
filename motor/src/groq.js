@@ -68,7 +68,7 @@ export async function gerarNoGroq({
   prompt,
   sistema,
   json = false,
-  temperatura = 0.4,
+  temperatura = 0.7,
 }) {
   if (!CHAVE) return null;
 

@@ -3,15 +3,29 @@ node_modules/
 out/
 build/
 
-# Chaves — nunca versionar
+# Chaves e segredos — nunca versionar
 .env
-.env.local
-.env*.local
+.env.*
+!.env.example
+!.env.*.example
+.env.evolution
+motor/.env
+painel/.env.local
 
-# Sessão do WhatsApp do motor (Fase 2): contém credenciais do pareamento
+# Runtime e estado volátil
+*.marco_ativacao.json
+.marco_ativacao.json
+motor/.marco_ativacao.json
+
+# Sessão do WhatsApp do motor: contém credenciais do pareamento
 motor/.wwebjs_auth/
 motor/.wwebjs_cache/
 motor/sessao/
+.sessao_whatsapp_web/
+motor/.sessao_whatsapp_web/
+
+# Supabase CLI cache temporário
+supabase/.temp/
 
 .DS_Store
 *.log

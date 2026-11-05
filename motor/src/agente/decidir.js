@@ -1,4 +1,5 @@
-import { montarPedido, prontoPara } from "../requisitos.js";
+import { montarPedido, prontoPara, PARA_FECHAR } from "../requisitos.js";
+import { primeiroNome } from "../abordagem.js";
 
 /*
   ============================================================================
@@ -81,6 +82,7 @@ export function decidir(retrato) {
     memoria = null,
     classificacao = null,
     ultimasMensagens = [],
+    objecao = null,
   } = retrato ?? {};
 
   /* ---- 1. Não é cliente ---- */
@@ -103,6 +105,72 @@ export function decidir(retrato) {
       confianca: CONFIANCA.ESTADO,
       motivo: "esta conversa está com você; só gravei",
     };
+  }
+
+  /* ---- 1c. Contorno de Objeções Persuasivas ou Fechamento ---- */
+  /*
+    Objeções e fechamento ganham prioridade máxima:
+    Se o cliente hesita, desiste ou desconfia, o bot DEVE persuadi-lo imediatamente,
+    mesmo que haja uma pendência de simulação em aberto na fila. Não deixar o cliente
+    esperando no vácuo ao apresentar uma objeção.
+  */
+  if (objecao) {
+    if (objecao.tipo === "acordo_fechamento") {
+      const primeiroNomeCliente = memoria?.nome ? primeiroNome(memoria.nome) : "";
+      const saudacao = primeiroNomeCliente ? `Show, ${primeiroNomeCliente}, vamos dar entrada!` : "Show, vamos dar entrada!";
+      const textoFechamento =
+        `${saudacao} Para formalizar a liberação no Santander com segurança e emitir seu contrato digital, vou precisar desta documentação:\n\n` +
+        `• Documento com foto (RG ou CNH frente e verso)\n` +
+        `• Comprovante de endereço atualizado\n` +
+        `• Contracheque atualizado\n` +
+        `• Extrato de margem consignável\n` +
+        `• Número(s) do(s) contrato(s) do Santander que vamos refinanciar\n\n` +
+        `Você prefere me mandar a foto do documento agora ou prefere que eu te chame daqui a pouco para tirar com calma?`;
+
+      return {
+        acao: ACOES.PERGUNTAR_CLIENTE,
+        confianca: CONFIANCA.REGRA,
+        motivo: "cliente aceitou proposta; solicitar checklist completo de documentos (5 itens) via alternativa ilusória",
+        pedido: {
+          texto: textoFechamento,
+          chaves: PARA_FECHAR,
+        },
+        categoria: "documentos",
+      };
+    }
+
+    if (objecao.tipo === "confirmacao_documentos") {
+      const primeiroNomeCliente = memoria?.nome ? primeiroNome(memoria.nome) : "";
+      return {
+        acao: ACOES.RESPONDER,
+        confianca: CONFIANCA.REGRA,
+        motivo: "cliente confirmou checklist de documentos ('Só isso mesmo?')",
+        categoria: "documentos",
+        objecao,
+      };
+    }
+
+    if (
+      [
+        "recusa_oferta",
+        "vou_pensar",
+        "conversar_familia",
+        "golpe_seguranca",
+        "nao_envia_documentos",
+        "ja_tem_consultor",
+        "nao_entendeu",
+        "nao_tem_interesse",
+        "confirmacao_documentos",
+      ].includes(objecao.tipo)
+    ) {
+      return {
+        acao: ACOES.RESPONDER,
+        confianca: CONFIANCA.REGRA,
+        motivo: `contorno de objeção: ${objecao.tipo}`,
+        categoria: "objecao",
+        objecao,
+      };
+    }
   }
 
   /* ---- 2. A bola já está com o consultor ---- */
@@ -159,15 +227,46 @@ export function decidir(retrato) {
 
   const { categoria, precisaDoRyan, motivo, decidiuNaRegra } = classificacao;
 
-  /* ---- 4. Assunto de dinheiro ---- */
+  /* ---- 4. Assunto de dinheiro ou atendimento humano ---- */
   if (precisaDoRyan) {
+    if (motivo === "pediu atendimento humano") {
+      return {
+        acao: ACOES.PEDIR_AO_CONSULTOR,
+        confianca: CONFIANCA.REGRA,
+        motivo: "cliente pediu atendimento humano",
+        categoria: "humano",
+        escalonamento: "humano",
+        assumirManual: true,
+      };
+    }
+
     /*
-      Aqui mora a autonomia. "Quanto libera?" sem contracheque não é
-      pergunta pro consultor — é pergunta que ninguém pode responder
-      ainda. Pedir o documento não fura a regra de ouro: sai uma
-      pergunta, sem número.
+      Na CapitalCred (Santander):
+      NUNCA faz questionário de convênio/banco (já sabemos que é Santander).
+      Em caso de pergunta de valor na prospecção/atendimento, escala para simulação na lista ou consultor.
+      Documentos só são pedidos na etapa de fechamento.
     */
-    const pedido = montarPedido(memoria);
+    const etapasSemQuestionario = [
+      "prospeccao",
+      "interesse",
+      "simulacao",
+      "primeiro_atendimento",
+      "em_atendimento",
+      "em_qualificacao",
+      "qualificado",
+      "novo_contato",
+      "novo",
+    ];
+
+    const ehOperacaoCapitalCred =
+      conversa.operacao === "capitalcred" ||
+      conversa.origem === "prospeccao" ||
+      conversa.origem_contato === "prospeccao" ||
+      etapasSemQuestionario.includes(conversa.etapa);
+
+    const pedido = ehOperacaoCapitalCred
+      ? (["fechamento", "documentos"].includes(conversa.etapa) ? montarPedido(memoria, { para: "fechar" }) : null)
+      : montarPedido(memoria);
     if (pedido) {
       return {
         acao: ACOES.PERGUNTAR_CLIENTE,
@@ -212,6 +311,9 @@ export function podeAgirSozinho(decisao, { modo, categoriasLiberadas = [] }) {
   if (decisao.categoria === "valor") return false;
 
   if (modo === "manual") return false;
+
+  // Objeção comercial com contorno persuasivo validado sai automaticamente em modo autônomo
+  if (decisao.categoria === "objecao" && modo === "autonomo") return true;
 
   const liberada = categoriasLiberadas.includes(decisao.categoria);
   if (!liberada) return false;

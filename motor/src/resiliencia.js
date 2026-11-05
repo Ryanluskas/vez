@@ -207,6 +207,7 @@ export const disjuntores = {
   ollama: disjuntor("Ollama"),
   groq: disjuntor("Groq"),
   supabase: disjuntor("Supabase", { falhasParaAbrir: 6, descansoMs: 30_000 }),
+  evolution: disjuntor("Evolution API", { falhasParaAbrir: 4, descansoMs: 15_000 }),
 };
 
 /* Como o painel e o log veem a saúde do motor num relance. */

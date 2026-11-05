@@ -64,11 +64,11 @@ export default async function PaginaDeRascunhos() {
 
       {rascunhos.length === 0 ? (
         <Vazio
-          titulo="Nenhum rascunho esperando"
-          corpo="Quando o bot conseguir responder algo sozinho, ou quando você responder alguém da Fila, a mensagem aparece aqui pronta — você lê, ajusta se quiser, e só então ela sai."
+          titulo="Nenhum rascunho esperando aprovação"
+          corpo="Quando o bot sugerir uma resposta para a Fila ou um follow-up de cliente, a mensagem aparecerá aqui com total clareza — você pode aprovar diretamente ou ajustar as palavras antes do disparo."
         />
       ) : (
-        <div className="border-b border-fio">
+        <div className="space-y-4">
           {rascunhos.map((r) => (
             <CartaoDeRascunho
               key={r.id}

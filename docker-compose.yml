@@ -1,0 +1,114 @@
+# ==============================================================================
+# VEZ — Orquestração de Infraestrutura (Evolution API v2 + Redis + Postgres)
+#
+# IMPORTANTE:
+# - Este PostgreSQL é EXCLUSIVO e ISOLADO para a Evolution API.
+# - NUNCA conecte o motor Vez ou o painel neste banco (o Vez usa o Supabase).
+# - A porta do PostgreSQL da Evolution está mapeada em 5433 para evitar conflitos.
+# ==============================================================================
+
+services:
+  evolution-postgres:
+    image: postgres:16-alpine
+    container_name: vez-evolution-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${EVOLUTION_DB_NAME:-evolution}
+      POSTGRES_USER: ${EVOLUTION_DB_USER:-evolution_user}
+      POSTGRES_PASSWORD: ${EVOLUTION_DB_PASSWORD:-evolution_secret_pass_2026}
+    volumes:
+      - evolution_postgres_data:/var/lib/postgresql/data
+    networks:
+      - vez-network
+    ports:
+      - "127.0.0.1:5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${EVOLUTION_DB_USER:-evolution_user} -d ${EVOLUTION_DB_NAME:-evolution}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  evolution-redis:
+    image: redis:7-alpine
+    container_name: vez-evolution-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - evolution_redis_data:/data
+    networks:
+      - vez-network
+    ports:
+      - "127.0.0.1:6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  evolution-api:
+    image: atendai/evolution-api:v2.2.3
+    container_name: vez-evolution-api
+    restart: unless-stopped
+    depends_on:
+      evolution-postgres:
+        condition: service_healthy
+      evolution-redis:
+        condition: service_healthy
+    environment:
+      # Configurações do Servidor
+      SERVER_TYPE: http
+      SERVER_PORT: 8080
+      SERVER_URL: ${EVOLUTION_SERVER_URL:-http://localhost:8080}
+
+      # Chave de autenticação global da Evolution API
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:-vez_evolution_api_key_capitalcred_2026}
+      AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "true"
+
+      # Banco de dados dedicado da Evolution
+      DATABASE_ENABLED: "true"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://${EVOLUTION_DB_USER:-evolution_user}:${EVOLUTION_DB_PASSWORD:-evolution_secret_pass_2026}@evolution-postgres:5432/${EVOLUTION_DB_NAME:-evolution}?schema=public
+      DATABASE_CONNECTION_CLIENT_NAME: evolution_api
+
+      # Redis dedicado para cache e mensageria
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: redis://evolution-redis:6379/1
+      CACHE_REDIS_PREFIX_KEY: evolution
+      CACHE_REDIS_SAVE_INSTANCES: "true"
+
+      # Instâncias WhatsApp
+      DEL_INSTANCE: "false"
+
+      # Configuração global de Webhook
+      WEBHOOK_GLOBAL_ENABLED: "false"
+      WEBHOOK_GLOBAL_URL: ""
+
+      # Logs
+      LOG_LEVEL: ERROR,WARN,INFO
+      LOG_COLOR: "true"
+      LOG_BAILEYS: error
+    ports:
+      - "127.0.0.1:8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    volumes:
+      - evolution_instances_data:/evolution/instances
+    networks:
+      - vez-network
+
+networks:
+  vez-network:
+    name: vez-network
+    driver: bridge
+
+volumes:
+  evolution_postgres_data:
+    name: vez_evolution_postgres_data
+  evolution_redis_data:
+    name: vez_evolution_redis_data
+  evolution_instances_data:
+    name: vez_evolution_instances_data

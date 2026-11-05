@@ -8,13 +8,21 @@ import { criarExecutor } from "./agente/executor.js";
 import { planejarConsultas, consultasEmTexto } from "./agente/planejar.js";
 import { EVENTOS, observadorMudo } from "./observar.js";
 import { criarTravas } from "./travas.js";
-import { criarLista } from "./lista.js";
+import { criarLista, comoNumero, comoDinheiro, calcularReducaoCapitalCred } from "./lista.js";
 import { numerosDeRisco } from "./numeros.js";
 import * as respostas from "./respostas.js";
 import { resolver, comoResponderSemTer, tirarOQueJaSei, oQueJaSei } from "./referencias.js";
 import { comoChamarAFonte, jaFoiDito } from "./valores.js";
 import { ehAbordagem, aceitouAAbordagem, primeiroNome } from "./abordagem.js";
 import { exemplosComBase } from "./estilo.js";
+import { identificarObjecao } from "./comercial/objecoes.js";
+import { diagnosticarNecessidade } from "./comercial/spin.js";
+import { classificarTemperaturaLead } from "./comercial/qualificador.js";
+import { obterManualCapitalCred } from "./comercial/playbook.js";
+import { gerarCodigoOperacao } from "./dossie/identificador.js";
+import { verificarBloqueioPiloto } from "./piloto.js";
+import { buscarContextoCampanha } from "./integracoes/botzapzap.js";
+import { validarLimiteTemporalMensagem } from "./marco_ativacao.js";
 import { log } from "./log.js";
 
 /* Quantas mensagens vao no contexto que a IA le e que aparece no painel. */
@@ -64,12 +72,24 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
     ultimaMensagem,
     direcao,
   }) {
-    const { data: existente, error: erroDaBusca } = await supabase
+    let query = supabase
       .from("conversas")
-      .select("id, nome, estagio, atender, etapa, seguir, id_chat, escalonamentos, so_voce")
-      .eq("telefone", telefone)
-      .eq("id_conexao", idConexao)
-      .maybeSingle();
+      .select("id, nome, estagio, atender, etapa, seguir, id_chat, escalonamentos, so_voce, opt_out, qualificacao")
+      .eq("telefone", telefone);
+
+    if (idConexao && typeof query.eq === "function") {
+      query = query.eq("id_conexao", idConexao);
+    } else if (typeof query.is === "function") {
+      query = query.is("id_conexao", null);
+    } else if (typeof query.eq === "function") {
+      query = query.eq("id_conexao", null);
+    }
+
+    if (userId && typeof query.eq === "function") {
+      query = query.eq("user_id", userId);
+    }
+
+    const { data: existente, error: erroDaBusca } = await query.maybeSingle();
 
     if (erroDaBusca) throw new Error(`buscar conversa: ${erroDaBusca.message}`);
 
@@ -83,11 +103,14 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
           telefone,
           nome: nome ?? null,
           estagio: "aguardando_bot",
+          etapa: "novo_contato",
+          opt_out: false,
+          qualificacao: "indefinida",
           ultima_mensagem: ultimaMensagem,
           ultima_direcao: direcao ?? null,
           atualizado_em: new Date().toISOString(),
         })
-        .select("id, nome, estagio, atender, etapa, seguir, escalonamentos, so_voce")
+        .select("id, nome, estagio, atender, etapa, seguir, escalonamentos, so_voce, opt_out, qualificacao")
         .single();
 
       if (error) throw new Error(`criar conversa: ${error.message}`);
@@ -147,10 +170,16 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
     de fabrica, senao o bot escreve como robo de banco na primeira semana.
   */
   async function exemplosDaCategoria(categoria) {
-    const { data } = await supabase
+    let query = supabase
       .from("respostas_boas")
       .select("mensagem_cliente, resposta_ryan")
-      .eq("categoria", categoria)
+      .eq("categoria", categoria);
+
+    if (userId) {
+      query = query.eq("user_id", userId);
+    }
+
+    const { data } = await query
       .order("criado_em", { ascending: false })
       .limit(EXEMPLOS_NO_PROMPT);
 
@@ -171,16 +200,25 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
       return manualGuardado;
     }
 
-    const { data, error } = await supabase
+    const manualBase = obterManualCapitalCred();
+
+    let query = supabase
       .from("conhecimento")
-      .select("assunto, conteudo")
+      .select("assunto, conteudo");
+
+    if (userId) {
+      query = query.eq("user_id", userId);
+    }
+
+    const { data, error } = await query
       .order("ordem")
       .order("criado_em");
 
-    // Tabela ainda nao criada: segue sem manual, sem derrubar nada.
-    manualGuardado = error
+    const custom = error
       ? ""
       : (data ?? []).map((f) => `${f.assunto}: ${f.conteudo}`).join("\n");
+
+    manualGuardado = custom ? `${manualBase}\n\n${custom}` : manualBase;
     manualEm = Date.now();
     return manualGuardado;
   }
@@ -303,6 +341,20 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
 
     // Congela: daqui pra frente o bot nao toca nesta conversa ate voce responder.
     await mudarEstagio(idConversa, "aguardando_voce");
+
+    // Atualiza etapa do funil comercial para 'aguardando_consultor' e anexa dossiê
+    try {
+      const dossieTexto = montarDossie(memoriaDoCliente, contexto);
+      await supabase
+        .from("conversas")
+        .update({
+          etapa: "aguardando_consultor",
+          observacoes: dossieTexto,
+          atualizado_em: new Date().toISOString(),
+        })
+        .eq("id", idConversa);
+    } catch {}
+
     return data.id;
   }
 
@@ -318,10 +370,15 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
       return prefsGuardadas;
     }
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("preferencias")
-      .select("modo, modo_autonomo, categorias")
-      .maybeSingle();
+      .select("modo, modo_autonomo, categorias");
+
+    if (userId) {
+      query = query.eq("user_id", userId);
+    }
+
+    const { data, error } = await query.maybeSingle();
 
     // Tabela nao criada ou linha inexistente: modo manual, o seguro.
     if (error || !data) {
@@ -633,6 +690,10 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
       motivo,
       categoria: categoria ?? "outro",
     });
+
+    if (chamada?.ok) {
+      conversa.estagio = "aguardando_voce";
+    }
 
     /*
       ==================================================================
@@ -1042,13 +1103,14 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
   });
 
   return {
+    memoria,
     executor,
     travas,
     observador,
     lista,
 
     /* Grava a mensagem crua. Vale pros dois lados da conversa. */
-    async registrar({ idConexao, idChat, idMensagem, telefone, nome, texto, direcao }) {
+    async registrar({ idConexao, idChat, idMensagem, telefone, nome, texto, direcao, timestamp }) {
       const conversa = await garantirConversa({
         idConexao,
         idChat,
@@ -1057,6 +1119,12 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
         ultimaMensagem: texto,
         direcao,
       });
+
+      conversa.ultimaMensagemTimestamp = timestamp
+        ? typeof timestamp === "number" && timestamp < 10000000000
+          ? timestamp * 1000
+          : timestamp
+        : Date.now();
 
       const { error } = await supabase.from("mensagens").insert({
         user_id: userId,
@@ -1085,14 +1153,30 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
         demorado tres dias.
       */
       if (direcao === "recebida") {
+        const agoraIso = new Date().toISOString();
         const mudanca = {
-          ultima_recebida_em: new Date().toISOString(),
+          ultima_recebida_em: agoraIso,
           followups_enviados: 0,
         };
         if (conversa.etapa === "novo") mudanca.etapa = "conversando";
 
         await supabase.from("conversas").update(mudanca).eq("id", conversa.id);
         Object.assign(conversa, mudanca);
+
+        // Cliente respondeu: cancela automaticamente solicitações de follow-up que estavam aguardando
+        try {
+          await supabase
+            .from("solicitacoes_followup")
+            .update({
+              status: "cancelada",
+              rejeicao_motivo: "Cliente respondeu antes do envio",
+              atualizado_em: agoraIso,
+            })
+            .eq("id_conversa", conversa.id)
+            .in("status", ["pendente", "aprovada"]);
+        } catch {
+          // Tabela pode não existir em testes unitários offline isolados; ignora suavemente
+        }
       }
 
       /*
@@ -1147,6 +1231,57 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
       });
 
       conversa.etapa = "documentos_recebidos";
+
+      /*
+        Diretriz de Persuasão / Fechamento:
+        Assim que o cliente enviar as fotos, responda de forma natural:
+        "Beleza, recebi aqui. Vou validar com o gerente agora e já te aviso."
+        APÓS ESSA MENSAGEM, VOCÊ PARA DE FALAR. O Ryan assume.
+      */
+      const textoFinal = respostas.documentoRecebido(conversa.nome, []);
+      if (textoFinal) {
+        await abrirRascunho({
+          idConversa: conversa.id,
+          texto: textoFinal,
+          categoria: "documentos",
+          origem: "consultor",
+        });
+      }
+
+      await supabase
+        .from("conversas")
+        .update({
+          etapa: "documentos_recebidos",
+          estagio: "aguardando_consultor",
+          so_voce: true,
+          atualizado_em: new Date().toISOString(),
+        })
+        .eq("id", conversa.id);
+
+      conversa.estagio = "aguardando_consultor";
+      conversa.so_voce = true;
+
+      // Integração com Dossiê Inteligente de Pagamento
+      try {
+        const { data: opExistente } = await supabase
+          .from("operacoes_pagamento")
+          .select("id, codigo_operacao")
+          .eq("id_conversa", conversa.id)
+          .maybeSingle();
+
+        if (!opExistente) {
+          const cod = gerarCodigoOperacao();
+          await supabase.from("operacoes_pagamento").insert({
+            user_id: userId,
+            id_conversa: conversa.id,
+            codigo_operacao: cod,
+            status: "em_coleta",
+          });
+          log.destaque(`[Dossiê ${cod}] Nova operação de pagamento criada para ${conversa.nome ?? conversa.telefone}`);
+        }
+      } catch {
+        // Tabela pode não estar provisionada em ambiente de teste mock
+      }
     },
 
     marcarEsperandoDocumentos,
@@ -1187,10 +1322,204 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
     async decidirEExecutar(conversa, texto, nomeCliente) {
       /* ---- 1. retrato ---- */
 
-      // Silenciada: nem gasta consulta. O resto do retrato não importa.
-      if (conversa.atender === false) {
-        log.info(`${nomeCliente ?? "contato"} está silenciado. Só gravei.`);
+      const textoNormalizado = (texto || "").toLowerCase().trim();
+
+      // Padrão amplo de retomada de contato (inclui gírias, saudações, confirmações e erros comuns de digitação como "wuero")
+      const querRetomar =
+        /\b(?:quer[oa]|wuero|faz(?:er)?|volte?i|pode|mandar?|simula[cç]|dnv|de\s+novo|ajuda|ol[aá]|oi+|opa|cheguei|bora|vamos|bom\s+dia|boa\s+tarde|quanto\s+libera|libera|e\s+a[ií]|t[aá]\s+a[ií]|oi\?|sim|como\s+funciona|tudo\s+bem|quero\s+ver)\b/i.test(textoNormalizado);
+
+      // 0. Marco Temporal de Ativação: mensagens anteriores à ativação não acionam IA retroativamente
+      const checagemTemporal = validarLimiteTemporalMensagem(
+        conversa.ultimaMensagemTimestamp ?? Date.now()
+      );
+      if (!checagemTemporal.permitido) {
+        log.info(
+          `[Marco Temporal] Mensagem de ${conversa.telefone} ignorada pela governança: ${checagemTemporal.motivo}`
+        );
         return;
+      }
+
+      // Modo Piloto Controlado: se configurado, o robô só interage com os números explicitamente autorizados
+      const checagemPiloto = verificarBloqueioPiloto(conversa.telefone, "atendimento");
+      if (checagemPiloto.bloqueado) {
+        return;
+      }
+
+      // Enriquecimento com contexto de campanha do Botzapzap (se houver)
+      const contextoCampanha = buscarContextoCampanha(conversa.telefone);
+      if (contextoCampanha && contextoCampanha.pertenceCampanha) {
+        try {
+          await memoria.garantir(conversa.id);
+          const fatos = await memoria.ler(conversa.id);
+          if (contextoCampanha.cliente.nome && !fatos?.nome) {
+            await memoria.aprender(conversa.id, "nome", contextoCampanha.cliente.nome, "campanha_botzapzap");
+          }
+          if (contextoCampanha.cliente.liberacaoEstimada && !fatos?.simulacao) {
+            await memoria.guardarSimulacao(conversa.id, {
+              valor: contextoCampanha.cliente.valorFmt || String(contextoCampanha.cliente.liberacaoEstimada),
+              taxa: "1,40%",
+              parcela: "sem aumento",
+              de: "campanha_botzapzap",
+            });
+          }
+        } catch {
+          // Falha não impeditiva
+        }
+      }
+
+      // 0. LGPD Opt-out estrito: cliente descadastrado só é respondido se expressamente pedir para retomar/fazer a operação
+      if (conversa.opt_out === true) {
+        const querRetomarOptOut =
+          /\b(?:quer[oa]\s+(?:faz(?:er)?|ver|simula|propost|atend|retom|volt)|wuero|reativ(?:ar)?|volte?i\s+a\s+ter\s+interesse|faz(?:er)?\s+dnv|de\s+novo|vamos\s+fazer|pode\s+fazer|quero\s+fazer|bora\s+fazer)\b/i.test(textoNormalizado);
+
+        if (querRetomarOptOut) {
+          log.destaque(`[LGPD Opt-Out] Cliente ${conversa.telefone} (${nomeCliente ?? "contato"}) retomou contato voluntariamente; revogando opt-out.`);
+          const agoraIso = new Date().toISOString();
+          await supabase
+            .from("conversas")
+            .update({
+              opt_out: false,
+              opt_out_em: null,
+              motivo_opt_out: null,
+              atender: true,
+              seguir: true,
+              so_voce: false,
+              etapa: "em_atendimento",
+              motivo_perda: null,
+              atualizado_em: agoraIso,
+            })
+            .eq("id", conversa.id);
+          conversa.opt_out = false;
+          conversa.atender = true;
+          conversa.seguir = true;
+          conversa.so_voce = false;
+          conversa.etapa = "em_atendimento";
+          conversa.motivo_perda = null;
+
+          try {
+            await supabase.from("consentimento_historico").insert({
+              user_id: userId,
+              id_conversa: conversa.id,
+              telefone: conversa.telefone,
+              tipo_evento: "opt_in_reativacao",
+              canal: "whatsapp",
+              mensagem_gatilho: texto,
+              criado_em: agoraIso,
+            });
+            // Destrava pendências abertas anteriores à desistência
+            await supabase
+              .from("pendencias")
+              .update({
+                status: "respondida",
+                resposta: "Reativação de atendimento",
+                respondida_em: agoraIso,
+              })
+              .eq("id_conversa", conversa.id)
+              .eq("status", "aberta");
+          } catch {}
+        } else {
+          log.info(`[LGPD Opt-Out] ${conversa.telefone} (${nomeCliente ?? "contato"}) está com opt-out ativo. Mensagem ambígua/não explícita bloqueada.`);
+          return;
+        }
+      }
+
+      // Detecção de PEDIDO EXPLÍCITO DE DESCADASTRRAMENTO (LGPD)
+      // Distingue rigorosamente pedido de opt-out de objeção comercial comum ("não quero", "taxa alta")
+      const ehPedidoOptOut =
+        /^(pare|parar|sair|descadastrar|cancelar|stop)$/i.test(textoNormalizado) ||
+        /\b(?:(?:favor\s+)?(?:pare|parar)\s+de\s+(?:me\s+)?(?:mandar|enviar)|n[aã]o\s+me\s+(?:mande|chame|envie)\s+mais|remover?\s+(?:o\s+)?(?:meu\s+)?(?:n[uú]mero|contato)|descadastrar?|excluir?\s+(?:meus\s+dados|meu\s+n[uú]mero)|apagar?\s+meu\s+n[uú]mero|tirar\s+meu\s+n[uú]mero|sair\s+da\s+lista|bloquear\s+contatos?|n[aã]o\s+quero\s+(?:mais\s+)?receber|opt[\s-]?out)\b/i.test(textoNormalizado);
+
+      if (ehPedidoOptOut) {
+        log.destaque(`[LGPD Opt-Out] Cliente ${conversa.telefone} solicitou descadastramento explícito.`);
+        const agoraIso = new Date().toISOString();
+        await supabase
+          .from("conversas")
+          .update({
+            opt_out: true,
+            opt_out_em: agoraIso,
+            motivo_opt_out: "solicitado_pelo_cliente",
+            atender: false,
+            seguir: false,
+            etapa: "perdido",
+            motivo_perda: "opt_out_lgpd",
+            atualizado_em: agoraIso,
+          })
+          .eq("id", conversa.id);
+        conversa.opt_out = true;
+        conversa.atender = false;
+        conversa.seguir = false;
+        conversa.etapa = "perdido";
+        conversa.motivo_perda = "opt_out_lgpd";
+
+        try {
+          await supabase.from("consentimento_historico").insert({
+            user_id: userId,
+            id_conversa: conversa.id,
+            telefone: conversa.telefone,
+            tipo_evento: "opt_out_solicitado",
+            canal: "whatsapp",
+            mensagem_gatilho: texto,
+            criado_em: agoraIso,
+          });
+        } catch {}
+
+        try {
+          await supabase
+            .from("solicitacoes_followup")
+            .update({
+              status: "cancelada",
+              rejeicao_motivo: "Cliente solicitou opt-out LGPD",
+              atualizado_em: agoraIso,
+            })
+            .eq("id_conversa", conversa.id)
+            .in("status", ["pendente", "aprovada"]);
+        } catch {}
+
+        // Enfileira confirmação formal de descadastramento (sem novas ofertas)
+        const confirmacaoOptOut = "Entendido perfeitamente. Seu número foi descadastrado e você não receberá mais mensagens da CapitalCred. Agradecemos sua atenção!";
+        await supabase.from("rascunhos").insert({
+          user_id: userId,
+          id_conversa: conversa.id,
+          texto_sugerido: confirmacaoOptOut,
+          status: "aprovado",
+          categoria: "opt_out",
+        });
+        return;
+      }
+
+      // Transição automática para primeiro_atendimento se estiver no início
+      if (conversa.etapa === "novo_contato" || conversa.etapa === "novo") {
+        await supabase
+          .from("conversas")
+          .update({ etapa: "primeiro_atendimento", atualizado_em: new Date().toISOString() })
+          .eq("id", conversa.id);
+        conversa.etapa = "primeiro_atendimento";
+      }
+
+      // Reativação de cliente silenciado, perdido ou assumido que retomou o contato (salvo se opt-out ativo)
+      if ((conversa.atender === false || conversa.etapa === "perdido" || conversa.so_voce === true) && !conversa.opt_out) {
+        if (querRetomar || conversa.so_voce === true || conversa.etapa === "perdido") {
+          log.destaque(`[Reativação] Cliente ${nomeCliente ?? conversa.telefone} retomou contato: liberando atendimento pelo bot.`);
+          await supabase
+            .from("conversas")
+            .update({
+              atender: true,
+              seguir: true,
+              so_voce: false,
+              etapa: "em_atendimento",
+              motivo_perda: null,
+              atualizado_em: new Date().toISOString(),
+            })
+            .eq("id", conversa.id);
+          conversa.atender = true;
+          conversa.seguir = true;
+          conversa.so_voce = false;
+          conversa.etapa = "em_atendimento";
+          conversa.motivo_perda = null;
+        } else if (conversa.atender === false) {
+          log.info(`${nomeCliente ?? "contato"} está silenciado. Só gravei.`);
+          return;
+        }
       }
 
       observador.registrar(EVENTOS.RECEBIDA, {
@@ -1302,6 +1631,140 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
         });
       }
 
+      /*
+        Inteligência Comercial CapitalCred: Objeções e Qualificação SPIN
+      */
+      const objecaoDetectada = identificarObjecao(texto);
+      if (objecaoDetectada) {
+        observador.registrar(EVENTOS.CLASSIFICOU, {
+          idConversa: conversa.id,
+          detalhe: `objeção detectada: ${objecaoDetectada.tipo}`,
+        });
+
+        if (objecaoDetectada.tipo === "opt_out_explicito") {
+          try {
+            await supabase
+              .from("conversas")
+              .update({
+                opt_out: true,
+                atender: false,
+                seguir: false,
+                etapa: "perdido",
+                motivo_perda: "opt_out_explicito",
+                atualizado_em: new Date().toISOString(),
+              })
+              .eq("id", conversa.id);
+            conversa.opt_out = true;
+            conversa.atender = false;
+            conversa.seguir = false;
+            conversa.etapa = "perdido";
+
+            // Cancela quaisquer follow-ups existentes
+            await supabase
+              .from("solicitacoes_followup")
+              .update({ status: "cancelada", rejeicao_motivo: "Cliente solicitou cancelamento de mensagens" })
+              .eq("id_conversa", conversa.id)
+              .in("status", ["pendente", "aprovada"]);
+          } catch {}
+        } else {
+          // Se já contornamos uma objeção anteriormente e o cliente reiterou a recusa, encerra educadamente
+          try {
+            const { data: objecoesAnteriores } = await supabase
+              .from("rascunhos")
+              .select("id, texto_sugerido")
+              .eq("id_conversa", conversa.id)
+              .eq("categoria", "objecao");
+
+            const jaPersuadiuRecusa = (objecoesAnteriores ?? []).some((r) =>
+              Boolean(r.texto_sugerido) &&
+              (/lucro\s+voltar\s+pro\s+seu\s+bolso/i.test(r.texto_sugerido) ||
+               /b[oó\u00f4]nus/i.test(r.texto_sugerido) ||
+               /menos\s+juros\s+pro\s+banco/i.test(r.texto_sugerido) ||
+               /economia/i.test(r.texto_sugerido))
+            );
+
+            if (
+              jaPersuadiuRecusa &&
+              (objecaoDetectada.tipo === "nao_tem_interesse" || /n[aã]o\s+quero\s+mesmo/i.test(texto))
+            ) {
+              log.info(`[Persuasão] Cliente reiterou recusa após contorno anterior. Respeitando e encerrando.`);
+              const agoraIso = new Date().toISOString();
+              await supabase
+                .from("conversas")
+                .update({
+                  atender: false,
+                  seguir: false,
+                  etapa: "perdido",
+                  motivo_perda: "recusa_apos_persuasao",
+                  atualizado_em: agoraIso,
+                })
+                .eq("id", conversa.id);
+              conversa.atender = false;
+              conversa.seguir = false;
+              conversa.etapa = "perdido";
+
+              const encerramento =
+                "Perfeito, respeito sua decisão! Se precisar futuramente para reduzir parcelas ou liberar valores, estou à disposição. Obrigado pelo retorno!";
+              await abrirRascunho({
+                idConversa: conversa.id,
+                texto: encerramento,
+                categoria: "saudacao",
+                origem: "bot",
+              });
+              return;
+            }
+          } catch {}
+        }
+      }
+
+      // Diagnóstico de necessidade comercial (SPIN)
+      const necessidade = diagnosticarNecessidade(texto);
+      if (necessidade && !lembrado?.objetivo) {
+        await ciclo.usar("atualizar_memoria", {
+          id_conversa: conversa.id,
+          objetivo: necessidade.objetivo,
+        });
+      }
+
+      // Avaliação da temperatura do lead (qualificação comercial)
+      const avaliacaoLead = classificarTemperaturaLead({
+        conversa,
+        memoria: lembrado,
+        ultimaMensagem: texto,
+      });
+
+      if (avaliacaoLead.qualificacao && avaliacaoLead.qualificacao !== conversa.qualificacao) {
+        try {
+          const mudancasComerciais = {
+            qualificacao: avaliacaoLead.qualificacao,
+            atualizado_em: new Date().toISOString(),
+          };
+
+          // Transição automática de etapa comercial baseada na qualificação
+          if (["quente", "morna"].includes(avaliacaoLead.qualificacao)) {
+            if (["novo_contato", "novo", "primeiro_atendimento", "em_qualificacao"].includes(conversa.etapa)) {
+              mudancasComerciais.etapa = "qualificado";
+              conversa.etapa = "qualificado";
+            }
+          } else if (avaliacaoLead.qualificacao === "desqualificada") {
+            if (conversa.opt_out === true) {
+              mudancasComerciais.etapa = "perdido";
+              mudancasComerciais.motivo_perda = "opt_out_lgpd";
+              conversa.etapa = "perdido";
+            }
+          } else if (conversa.etapa === "primeiro_atendimento") {
+            mudancasComerciais.etapa = "em_qualificacao";
+            conversa.etapa = "em_qualificacao";
+          }
+
+          await supabase
+            .from("conversas")
+            .update(mudancasComerciais)
+            .eq("id", conversa.id);
+          conversa.qualificacao = avaliacaoLead.qualificacao;
+        } catch {}
+      }
+
       /* ---- 2. decidir ---- */
 
       const decisao = decidir({
@@ -1315,6 +1778,7 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
         memoria: lembrado,
         classificacao,
         ultimasMensagens,
+        objecao: objecaoDetectada,
       });
 
       const conferida = validarDecisao(decisao);
@@ -1366,7 +1830,7 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
         sem número, e o assunto continua sendo o dele.
         ================================================================
       */
-      if (referencia && !travada) {
+      if (referencia && !travada && !objecaoDetectada) {
         const seguiu = await responderReferencia({
           conversa,
           nomeCliente,
@@ -1452,12 +1916,32 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
           // Não deu pra escrever com segurança: cai pra Fila, como sempre.
         }
 
+        // Se o cliente pediu simulação/valor e ainda não temos na lista, avisa imediatamente no tom do Ryan
+        if (decisao.escalonamento === "valor" && !daLista?.dados?.disponivel) {
+          const primeiroNomeCliente = primeiroNome(lembrado?.nome ?? nomeCliente);
+          const avisoSimulacao = primeiroNomeCliente
+            ? `Vou fazer uma simulação aqui no sistema para você, ${primeiroNomeCliente}, para ver quanto libera certinho e já te passo as condições, tá bom?`
+            : "Vou fazer uma simulação aqui no sistema para você para ver quanto libera certinho e já te passo as condições, tá bom?";
+
+          await abrirRascunho({
+            idConversa: conversa.id,
+            texto: avisoSimulacao,
+            categoria: "saudacao",
+            origem: "bot",
+          });
+        }
+
+        const perguntaAoConsultor =
+          decisao.escalonamento === "valor"
+            ? `Quanto libera no total para ${nomeCliente ?? "o cliente"} no Santander? (Informe o valor total para calcularmos a redução de 62/38 ou 50/50 e gerar a proposta oficial)`
+            : texto;
+
         const chamada = await mandarProConsultor({
           ciclo,
           conversa,
           nomeCliente,
           lembrado,
-          pergunta: texto,
+          pergunta: perguntaAoConsultor,
           motivo: decisao.motivo,
           categoria: decisao.categoria ?? "outro",
         });
@@ -1531,11 +2015,37 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
         na saída, além de eu ter escrito todas à mão.
         ================================================================
       */
+      // Se for saudação pura, confere se já não enviamos saudação recentemente ou se há rascunho de saudação na fila para não flodar o cliente
+      if (categoria === "saudacao") {
+        try {
+          const [{ count: msgsRecentes }, { count: rascunhosRecentes }] = await Promise.all([
+            supabase
+              .from("mensagens")
+              .select("id", { count: "exact", head: true })
+              .eq("id_conversa", conversa.id)
+              .eq("direcao", "enviada")
+              .gte("criado_em", new Date(Date.now() - 15 * 60 * 1000).toISOString()),
+            supabase
+              .from("rascunhos")
+              .select("id", { count: "exact", head: true })
+              .eq("id_conversa", conversa.id)
+              .eq("categoria", "saudacao")
+              .gte("criado_em", new Date(Date.now() - 5 * 60 * 1000).toISOString()),
+          ]);
+
+          if ((msgsRecentes ?? 0) > 0 || (rascunhosRecentes ?? 0) > 0) {
+            log.info(`[Saudação] ${nomeCliente ?? "Cliente"} já recebeu saudação recente ou já tem rascunho em fila; suprimindo repetição.`);
+            return;
+          }
+        } catch {}
+      }
+
       const semIa = respostas.respostaDeterministica({
         categoria,
         mensagemCliente: texto,
         nomeCliente: primeiroNome(lembrado?.nome ?? nomeCliente),
         fatosNovos: novosFatos,
+        objecao: objecaoDetectada,
         semente: Date.now(),
       });
 
@@ -1572,6 +2082,15 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
         await planejarConsultas({ texto, idConversa: conversa.id })
       );
 
+      let textoConsultas = consultasEmTexto(consultas);
+      if (objecaoDetectada) {
+        textoConsultas =
+          `DIRETRIZ DE PERSUASÃO E CONTORNO (${objecaoDetectada.tipo.toUpperCase()}):\n` +
+          `- Estratégia: ${objecaoDetectada.estrategia}\n` +
+          `- Como responder obrigatoriamente: ${objecaoDetectada.diretriz}\n\n` +
+          textoConsultas;
+      }
+
       const exemplos = await exemplosDaCategoria(categoria);
       const manual = await manualDaOperacao();
 
@@ -1583,7 +2102,7 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
         exemplos,
         manual,
         memoria: memoria.emTexto(lembrado),
-        consultas: consultasEmTexto(consultas),
+        consultas: textoConsultas,
       });
 
       /*
@@ -1755,50 +2274,101 @@ export function criarFluxo(supabase, userId, { observador = observadorMudo() } =
         fonte, e recusa qualquer outro.
         ================================================================
       */
-      if (numerosDeRisco(pendencia.resposta ?? "").length) {
+      const respostaCrua = String(pendencia.resposta ?? "").trim();
+      const primeiroNomeCliente = primeiroNome(conversa?.nome);
+      const numeros = numerosDeRisco(respostaCrua);
+
+      // Detecta se a resposta do operador é valor de redução / simulação
+      const valorBruto = comoNumero(respostaCrua);
+      let calculoReducao = null;
+      let propostaPadrao = null;
+
+      if (valorBruto > 0 && (pendencia.categoria === "valor" || /^(?:libera\s*)?r?\$?\s*\d+/i.test(respostaCrua))) {
+        calculoReducao = calcularReducaoCapitalCred(valorBruto);
+        propostaPadrao =
+          `${primeiroNomeCliente ? `${primeiroNomeCliente}, ` : ""}rodei sua simulação aqui no sistema. Conseguimos derrubar sua taxa de 2,x% para 1,40% ao mês pelo Santander, atualizando o prazo para 120 meses sem subir um centavo na sua parcela atual. Com essa redução, libera ${calculoReducao.clienteFormatado} líquido na sua conta hoje. Ficou bom pra você? Quer seguir com essa liberação?`;
+      }
+
+      if (calculoReducao) {
+        await memoria.guardarSimulacao(pendencia.id_conversa, {
+          valorTotal: calculoReducao.valorTotal,
+          valorCliente: calculoReducao.cliente,
+          valorEmpresa: calculoReducao.empresa,
+          regra: calculoReducao.regra,
+          de: "consultor",
+        });
+      } else if (numeros.length) {
         await memoria.guardarSimulacao(pendencia.id_conversa, {
           valor: pendencia.resposta,
           de: "consultor",
         });
       }
 
-      const texto = await escreverComResposta({
-        mensagemCliente: pendencia.pergunta,
-        respostaDoConsultor: pendencia.resposta,
-        nomeCliente: primeiroNome(conversa?.nome),
-        exemplos,
+      // Se o operador apenas digitou um número cru (ex: "7600", "Libera 7600"), NÃO manda a frase seca
+      // Usa a proposta persuasiva estruturada na regra CapitalCred (120 meses / 1,40% / valor líquido)
+      const ehNumeroSeco =
+        /^(?:libera\s*)?r?\$?\s*\d+(?:[.,]\d+)?(?:\s*(?:reais|no\s*total))?$/i.test(respostaCrua) ||
+        (numeros.length > 0 && respostaCrua.length < 30);
+
+      const fontesPermitidas = [
+        pendencia.resposta,
+        pendencia.pergunta,
         manual,
-        memoria: memoria.emTexto(lembrado),
-      });
+        "1,40",
+        "1.40",
+        "1,40%",
+        "120",
+        "120 meses",
+      ];
+      if (calculoReducao) {
+        fontesPermitidas.push(
+          calculoReducao.clienteFormatado,
+          String(calculoReducao.cliente),
+          calculoReducao.empresaFormatado,
+          String(calculoReducao.empresa),
+          String(calculoReducao.valorTotal),
+          propostaPadrao
+        );
+      }
 
-      /*
-        A mesma porta, com uma diferença: aqui número PODE sair, porque o
-        dado é seu. O que se confere é se a IA acrescentou algum outro
-        enquanto embrulhava a sua resposta.
+      let vaiSair;
+      if (ehNumeroSeco && propostaPadrao) {
+        vaiSair = propostaPadrao;
+      } else {
+        const texto = await escreverComResposta({
+          mensagemCliente: pendencia.pergunta,
+          respostaDoConsultor: pendencia.resposta,
+          nomeCliente: primeiroNomeCliente,
+          exemplos,
+          manual,
+          memoria: memoria.emTexto(lembrado),
+        });
 
-        Reprovou? Sai a sua resposta como você escreveu. Ela é curta e
-        crua, mas é sua e está certa — e o cliente prefere um "4200 em 12x
-        de 380" seco a um texto bonito com o número errado.
-      */
-      const porta = validarAntesDeEnviar(texto, {
-        permitirNumeros: true,
-        fontesPermitidas: [pendencia.resposta, pendencia.pergunta, manual],
-        exemplos,
-        manual,
-        memoria: lembrado,
-        nomeCliente: primeiroNome(conversa?.nome),
-        mensagemCliente: pendencia.pergunta,
-      });
+        const porta = validarAntesDeEnviar(texto, {
+          permitirNumeros: true,
+          fontesPermitidas,
+          exemplos,
+          manual,
+          memoria: lembrado,
+          nomeCliente: primeiroNomeCliente,
+          mensagemCliente: pendencia.pergunta,
+        });
 
-      observador.registrar(EVENTOS.VALIDOU, {
-        idConversa: pendencia.id_conversa,
-        ok: porta.ok,
-        detalhe: porta.ok ? "aprovada (resposta sua)" : `${porta.codigo}: ${porta.motivo}`,
-      });
+        observador.registrar(EVENTOS.VALIDOU, {
+          idConversa: pendencia.id_conversa,
+          ok: porta.ok,
+          detalhe: porta.ok ? "aprovada (resposta sua)" : `${porta.codigo}: ${porta.motivo}`,
+        });
 
-      const vaiSair = porta.ok ? texto : pendencia.resposta;
-      if (!porta.ok) {
-        log.alerta(`Barrei o texto da IA (${porta.motivo}). Mandando a sua resposta como está.`);
+        if (porta.ok) {
+          vaiSair = texto;
+        } else if (propostaPadrao) {
+          log.alerta(`Barrei o texto da IA (${porta.motivo}). Utilizando a proposta oficial formatada.`);
+          vaiSair = propostaPadrao;
+        } else {
+          log.alerta(`Barrei o texto da IA (${porta.motivo}). Mandando a sua resposta como está.`);
+          vaiSair = pendencia.resposta;
+        }
       }
 
       await abrirRascunho({

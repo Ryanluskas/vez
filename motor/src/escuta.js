@@ -1,6 +1,7 @@
 import { tentar } from "./resiliencia.js";
 import { EVENTOS, observadorMudo } from "./observar.js";
 import * as respostas from "./respostas.js";
+import { telefoneAutorizadoNoPiloto } from "./piloto.js";
 import { log } from "./log.js";
 
 /*
@@ -14,7 +15,9 @@ import { log } from "./log.js";
   seguranca: se o socket cair enquanto voce aprova, nada fica preso.
 */
 
-const VARREDURA_MS = 15_000;
+const VARREDURA_MS = 2_000;
+
+export const idsMensagensEnviadasPorVez = new Set();
 
 export function criarEscuta({ supabase, fluxo, maestro, userId, observador = observadorMudo() }) {
   // Ids em processamento agora. Sem isso, o realtime e a varredura podem
@@ -69,11 +72,17 @@ export function criarEscuta({ supabase, fluxo, maestro, userId, observador = obs
     ==================================================================
   */
   async function varrerPendenciasRespondidas() {
-    const { data, error } = await supabase
+    let query = supabase
       .from("pendencias")
       .select("id, id_conversa, pergunta, resposta, categoria")
       .eq("status", "respondida")
-      .not("resposta", "is", null)
+      .not("resposta", "is", null);
+
+    if (userId) {
+      query = query.eq("user_id", userId);
+    }
+
+    const { data, error } = await query
       .order("respondida_em", { ascending: false })
       .limit(60);
 
@@ -102,11 +111,17 @@ export function criarEscuta({ supabase, fluxo, maestro, userId, observador = obs
   /* ---------- 2. rascunhos aprovados -> WhatsApp ---------- */
 
   async function varrerRascunhosAprovados() {
-    const { data, error } = await supabase
+    let query = supabase
       .from("rascunhos")
       .select("id, id_conversa, id_pendencia, texto_sugerido, categoria, automatico, origem")
       .eq("status", "aprovado")
-      .is("enviado_em", null)
+      .is("enviado_em", null);
+
+    if (userId) {
+      query = query.eq("user_id", userId);
+    }
+
+    const { data, error } = await query
       .order("criado_em", { ascending: true })
       .limit(10);
 
@@ -118,13 +133,28 @@ export function criarEscuta({ supabase, fluxo, maestro, userId, observador = obs
   }
 
   async function enviar(rascunho) {
-    const { data: conversa } = await supabase
+    let query = supabase
       .from("conversas")
       .select("id, telefone, nome, id_conexao, id_chat")
-      .eq("id", rascunho.id_conversa)
-      .single();
+      .eq("id", rascunho.id_conversa);
+
+    if (userId) {
+      query = query.eq("user_id", userId);
+    }
+
+    const { data: conversa } = await query.maybeSingle();
 
     if (!conversa) throw new Error("rascunho aprovado sem conversa; pulei");
+
+    // Filtro de Piloto Controlado: se for envio automático e o número não for autorizado, descarta
+    if (rascunho.automatico && !telefoneAutorizadoNoPiloto(conversa.telefone)) {
+      log.info(`[Piloto Restrito] Rascunho automático descartado para ${conversa.nome ?? conversa.telefone}: fora da allowlist.`);
+      await supabase
+        .from("rascunhos")
+        .update({ enviado_em: new Date().toISOString(), status: "descartado" })
+        .eq("id", rascunho.id);
+      return;
+    }
 
     /*
       A resposta tem que sair pelo MESMO numero por onde o cliente escreveu.
@@ -155,10 +185,24 @@ export function criarEscuta({ supabase, fluxo, maestro, userId, observador = obs
       segunda falha o rascunho fica como esta e a varredura tenta de novo
       em 15s — sem nunca marcar como enviado o que nao saiu.
     */
-    const envio = await tentar(() => whatsapp.sendMessage(destino, rascunho.texto_sugerido), {
+    let envio = await tentar(() => whatsapp.sendMessage(destino, rascunho.texto_sugerido), {
       nome: `envio para ${conversa.nome ?? conversa.telefone}`,
       tentativas: 2,
     });
+
+    if (!envio.ok && (String(envio.erro).includes("does not exist") || String(envio.erro).includes("404"))) {
+      const fallbackWhatsapp = maestro.qualquerCliente?.();
+      if (fallbackWhatsapp && fallbackWhatsapp !== whatsapp) {
+        log.info(`[Escuta] Instância falhou com 404. Tentando envio pelo WhatsApp ativo conectado...`);
+        const reenvio = await tentar(() => fallbackWhatsapp.sendMessage(destino, rascunho.texto_sugerido), {
+          nome: `reenvio alternativo para ${conversa.nome ?? conversa.telefone}`,
+          tentativas: 1,
+        });
+        if (reenvio.ok) {
+          envio = reenvio;
+        }
+      }
+    }
 
     if (!envio.ok) {
       observador.registrar(EVENTOS.ERRO, {
@@ -176,9 +220,15 @@ export function criarEscuta({ supabase, fluxo, maestro, userId, observador = obs
       .update({ enviado_em: agora })
       .eq("id", rascunho.id);
 
+    const keyId = envio?.valor?.keyId || envio?.valor?.key?.id || null;
+    if (keyId) idsMensagensEnviadasPorVez.add(keyId);
+
     await supabase.from("mensagens").insert({
       user_id: userId,
       id_conversa: conversa.id,
+      id_whatsapp: keyId,
+      id_mensagem_whatsapp: keyId,
+      status_entrega: keyId ? "enviado" : "incerto",
       direcao: "enviada",
       texto: rascunho.texto_sugerido,
     });
@@ -385,7 +435,7 @@ export function criarEscuta({ supabase, fluxo, maestro, userId, observador = obs
         )
         .on(
           "postgres_changes",
-          { event: "UPDATE", schema: "public", table: "rascunhos" },
+          { event: "*", schema: "public", table: "rascunhos" },
           () => varrerRascunhosAprovados().catch((e) => log.erro(e.message))
         )
         .subscribe();

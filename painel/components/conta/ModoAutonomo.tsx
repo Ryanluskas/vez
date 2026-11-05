@@ -10,6 +10,8 @@ import { salvarModoAutonomo, type Resultado } from "@/lib/acoes-painel";
 import { CATEGORIAS_LIBERAVEIS, MODOS } from "@/lib/modos";
 import { cn } from "@/lib/cn";
 
+import { Botao } from "@/components/ui/Botao";
+
 /*
   O interruptor que transforma o produto: com ele ligado, o bot fecha com o
   cliente enquanto o consultor faz outra coisa.
@@ -95,16 +97,13 @@ export function ModoAutonomo({
       </fieldset>
 
       <div className="mt-5 flex flex-wrap items-center gap-3">
-        <button
+        <Botao
+          tom="primario"
           type="submit"
           disabled={salvando}
-          className={cn(
-            "h-9 rounded-md bg-jade px-3.5 text-[13px] font-medium text-jade-texto",
-            "transition-colors hover:bg-jade-forte disabled:opacity-45"
-          )}
         >
-          {salvando ? "Salvando…" : "Salvar"}
-        </button>
+          {salvando ? "Salvando…" : "Salvar Configuração"}
+        </Botao>
         {estado.ok ? (
           <span role="status" className="text-[12px] text-jade">
             Salvo. O motor pega em até 5 minutos.

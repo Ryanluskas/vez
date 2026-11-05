@@ -7,12 +7,10 @@ import {
   type Resultado,
 } from "@/lib/acoes-painel";
 import { cn } from "@/lib/cn";
+import { AppleButton } from "@/components/ui/apple/AppleButton";
+import { AppleBadge } from "@/components/ui/apple/AppleBadge";
+import { Check, Trash2, Edit3, MessageSquare, Phone, Sparkles } from "lucide-react";
 
-/*
-  A tela de aprovação. É a última porta antes da mensagem sair da máquina
-  do consultor — por isso o texto vem num campo editável, não num balão de
-  leitura. O que ele lê aqui é literalmente o que o cliente vai receber.
-*/
 export function CartaoDeRascunho({
   id,
   nome,
@@ -26,7 +24,6 @@ export function CartaoDeRascunho({
   nome: string;
   telefone: string;
   categoria: string | null;
-  /* De onde veio o numero: bot, sua resposta na Fila, ou uma lista. */
   origem?: string | null;
   textoSugerido: string;
   perguntaOriginal: string | null;
@@ -45,102 +42,141 @@ export function CartaoDeRascunho({
 
   if (aprovacao.ok) {
     return (
-      <article className="border-t border-fio py-4">
-        <p className="text-[13px] text-jade">
-          Aprovado para {nome}. O motor envia em alguns segundos.
+      <div className="rounded-2xl border border-jade/30 bg-jade-fundo p-4 text-jade flex items-center gap-3">
+        <Check className="h-5 w-5 shrink-0" />
+        <p className="text-[14px] font-medium">
+          Rascunho aprovado para <strong>{nome}</strong>. O motor fará o envio em instantes pelo WhatsApp.
         </p>
-      </article>
+      </div>
     );
   }
 
   if (descarte.ok) {
     return (
-      <article className="border-t border-fio py-4">
-        <p className="text-[13px] text-texto3">
-          Descartado. A conversa de {nome} voltou para o bot.
+      <div className="rounded-2xl border border-fio bg-sup2/40 p-4 text-texto3 flex items-center gap-3">
+        <Trash2 className="h-5 w-5 shrink-0" />
+        <p className="text-[14px]">
+          Rascunho descartado para <strong>{nome}</strong>. A conversa foi devolvida ao fluxo normal.
         </p>
-      </article>
+      </div>
     );
   }
 
   return (
-    <article className="border-t border-fio py-4">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="text-[14px] text-texto">{nome}</span>
-        <span className="num text-[12px] text-texto3">{telefone}</span>
-        {categoria ? <span className="rotulo">{categoria}</span> : null}
-
-        {/* De onde saiu o numero. Vale a tela porque muda o que voce confere:
-            num rascunho da lista, o que se confere e se o cliente e mesmo
-            aquela pessoa — a planilha casa por telefone. */}
-        {origem === "lista" ? (
-          <span className="rounded-sm bg-fundo px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-jade">
-            valores da lista
+    <article className="rounded-2xl border border-fio bg-sup/60 backdrop-blur-xl p-5 space-y-4 transition-all hover:border-fio-forte shadow-sm">
+      {/* Header do Rascunho */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-fio/60">
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <span className="font-display text-[16px] font-semibold text-texto tracking-tight">
+            {nome}
           </span>
-        ) : null}
+          <span className="font-mono text-[12px] text-texto3 flex items-center gap-1">
+            <Phone className="h-3 w-3" />
+            {telefone}
+          </span>
+
+          {categoria && (
+            <AppleBadge variant="outline">
+              {categoria}
+            </AppleBadge>
+          )}
+
+          {origem === "lista" && (
+            <AppleBadge variant="success">
+              Importado de Lista
+            </AppleBadge>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1 text-[11px] font-mono text-texto3">
+          <Sparkles className="h-3.5 w-3.5 text-jade" />
+          <span>Supervisão Humana Obrigatória</span>
+        </div>
       </div>
 
-      {perguntaOriginal ? (
-        <p className="mt-1.5 text-[13px] leading-relaxed text-texto2">
-          <span className="text-texto3">Cliente: </span>
-          {perguntaOriginal}
+      {/* Pergunta Original do Cliente (se houver) */}
+      {perguntaOriginal && (
+        <div className="space-y-1">
+          <span className="text-[11px] font-mono uppercase tracking-wider text-texto3">
+            O que o cliente perguntou
+          </span>
+          <p className="text-[13px] text-texto2 bg-sup2/40 p-3 rounded-xl border border-fio/40 leading-relaxed">
+            &quot;{perguntaOriginal}&quot;
+          </p>
+        </div>
+      )}
+
+      {/* Editor do Texto Sugerido */}
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] font-mono uppercase tracking-wider text-texto3 flex items-center gap-1">
+            <MessageSquare className="h-3.5 w-3.5 text-jade" />
+            Mensagem que será enviada
+          </span>
+          {editado && (
+            <span className="text-[11px] text-amber-500 font-medium flex items-center gap-1">
+              <Edit3 className="h-3 w-3" />
+              Texto personalizado pelo consultor
+            </span>
+          )}
+        </div>
+
+        <textarea
+          value={texto}
+          onChange={(e) => setTexto(e.target.value)}
+          rows={Math.min(8, Math.max(3, Math.ceil(texto.length / 55)))}
+          aria-label={`Mensagem para ${nome}`}
+          className={cn(
+            "w-full resize-y rounded-xl border border-fio bg-sup px-4 py-3",
+            "text-[14px] leading-relaxed text-texto placeholder:text-texto3 transition-all",
+            "hover:border-fio-forte focus:border-jade focus:outline-none focus:ring-2 focus:ring-jade/20"
+          )}
+        />
+      </div>
+
+      {/* Ações de Aprovação e Descarte */}
+      <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-fio/60">
+        <div className="flex items-center gap-2">
+          <form action={aprovar}>
+            <input type="hidden" name="id" value={id} />
+            <input type="hidden" name="texto" value={texto} />
+            <AppleButton
+              type="submit"
+              variant="primary"
+              size="md"
+              isLoading={aprovando}
+              disabled={aprovando || descartando || !texto.trim()}
+              icon={<Check className="h-4 w-4" />}
+            >
+              {aprovando ? "Enviando…" : "Aprovar e Enviar"}
+            </AppleButton>
+          </form>
+
+          <form action={descartar}>
+            <input type="hidden" name="id" value={id} />
+            <AppleButton
+              type="submit"
+              variant="ghost"
+              size="md"
+              isLoading={descartando}
+              disabled={aprovando || descartando}
+              icon={<Trash2 className="h-4 w-4" />}
+            >
+              Descartar
+            </AppleButton>
+          </form>
+        </div>
+
+        <p className="text-[11px] text-texto3">
+          Ao aprovar, a mensagem sai com a chancela do seu número no WhatsApp.
         </p>
-      ) : null}
-
-      <textarea
-        value={texto}
-        onChange={(e) => setTexto(e.target.value)}
-        rows={Math.min(8, Math.max(3, Math.ceil(texto.length / 60)))}
-        aria-label={`Mensagem para ${nome}`}
-        className={cn(
-          "mt-2.5 w-full resize-y rounded-md border border-fio bg-sup px-3 py-2.5",
-          "text-[14px] leading-relaxed text-texto transition-colors",
-          "hover:border-fio-forte focus:border-jade focus:outline-none"
-        )}
-      />
-
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        <form action={aprovar}>
-          <input type="hidden" name="id" value={id} />
-          <input type="hidden" name="texto" value={texto} />
-          <button
-            type="submit"
-            disabled={aprovando || descartando || !texto.trim()}
-            className={cn(
-              "h-9 rounded-md bg-jade px-3.5 text-[13px] font-medium text-jade-texto",
-              "transition-colors hover:bg-jade-forte disabled:opacity-45"
-            )}
-          >
-            {aprovando ? "Enviando…" : "Aprovar e enviar"}
-          </button>
-        </form>
-
-        <form action={descartar}>
-          <input type="hidden" name="id" value={id} />
-          <button
-            type="submit"
-            disabled={aprovando || descartando}
-            className={cn(
-              "h-9 rounded-md border border-fio bg-transparent px-3.5 text-[13px] text-texto2",
-              "transition-colors hover:border-fio-forte hover:text-texto disabled:opacity-45"
-            )}
-          >
-            Descartar
-          </button>
-        </form>
-
-        {editado ? (
-          <span className="text-[11px] text-texto3">
-            Você editou — o bot vai aprender a sua versão.
-          </span>
-        ) : null}
       </div>
 
-      {aprovacao.erro || descarte.erro ? (
-        <p role="alert" className="mt-2 text-[12px] text-erro">
+      {(aprovacao.erro || descarte.erro) && (
+        <div className="p-3 rounded-xl bg-erro-fundo border border-erro/30 text-erro text-[13px]">
           {aprovacao.erro ?? descarte.erro}
-        </p>
-      ) : null}
+        </div>
+      )}
     </article>
   );
 }

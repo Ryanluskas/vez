@@ -102,7 +102,7 @@ export function documentoRecebido(nomeCliente, aindaFalta = []) {
   if (falta.length === 0) {
     return comNome(
       nomeCliente,
-      "Recebi seus documentos, obrigado! Vou analisar aqui e já te retorno."
+      "Beleza, recebi aqui. Vou validar com o gerente agora e já te aviso."
     );
   }
 
@@ -213,7 +213,14 @@ export function vouVerificar(nomeCliente, quantosAvisosJaMandei = 0) {
 /* Este texto é um dos meus avisos? Serve pra contar quantos já saíram. */
 export function ehAvisoDeQueVaiVerificar(texto) {
   const t = String(texto ?? "").toLowerCase();
-  return VOU_VERIFICAR.some((frase) => t.includes(frase.toLowerCase()));
+  return (
+    VOU_VERIFICAR.some((frase) => t.includes(frase.toLowerCase())) ||
+    t.includes("vou fazer uma simulação") ||
+    t.includes("já te passo as condições") ||
+    t.includes("vou confirmar isso") ||
+    t.includes("já te retorno") ||
+    t.includes("já te falo")
+  );
 }
 
 /* ------------------------------------------------------------------
@@ -283,20 +290,38 @@ export function jaTeFalei(nomeCliente, quantasVezesJaConfirmei = 0) {
   return frase ? comNome(nomeCliente, frase) : null;
 }
 
+export function respostaObjecao(tipo, nomeCliente) {
+  const nome = nomeCliente ? ` ${nomeCliente}` : "";
+  switch (tipo) {
+    case "nao_tem_interesse":
+      return `A questão aqui não é só o dinheiro, mas a economia${nome}: você vai baixar sua taxa para 1,40% ao mês pelo Santander, pagando menos juros pro banco. O dinheiro na conta é um bônus estratégico. Faz sentido, né?`;
+    case "vou_pensar":
+      return `Pensar agora é deixar dinheiro na mesa e arriscar que a taxa suba amanhã${nome}. O valor já está aprovado e reservado. Tirando isso, tem algo nos números ou na taxa que não te agradou? Posso garantir sua liberação agora?`;
+    case "conversar_familia":
+      return `Com certeza${nome}! Decisão em família é sagrada. Mas tirando a conversa com ela, a ideia de reduzir os juros pra 1,40% e liberar esse valor líquido sem mexer na parcela ficou boa pra você?`;
+    case "recusa_oferta":
+      return `O prazo ajusta para 120 meses justamente para garantir que você pegue o valor máximo com a taxa reduzida de 1,40% sem subir nada na parcela${nome}. É trocar uma dívida cara por uma mais barata e ainda embolsar a diferença. Vamos fechar?`;
+    case "golpe_seguranca":
+      return `Entendo perfeitamente, hoje em dia tem que desconfiar mesmo${nome}! A CapitalCred é registrada no CNPJ 53.093.082/0001-22 e a formalização é feita 100% no canal oficial do Santander com biometria facial, sem você pagar nada adiantado. Segurança total.`;
+    case "nao_envia_documentos":
+      return `Compreendo a cautela${nome}! O documento é exigência do próprio banco para conferência e averbação antifraude. Você prefere me mandar a foto do documento agora ou prefere que eu te chame mais tarde para tirar com calma?`;
+    case "ja_tem_consultor":
+      return `Maravilha, bom quando já tem alguém de confiança${nome}! Só te recomendo conferir se a taxa dele chega a 1,40% ao mês. Se você quiser, comparo sem compromisso pra você ter certeza que tá no melhor negócio.`;
+    case "nao_entendeu":
+      return `É bem direto${nome}: sua parcela mensal continua rigorosamente igual, a taxa cai de 2,x% para 1,40% e a diferença do refinanciamento cai na sua conta em dinheiro.`;
+    case "confirmacao_documentos":
+      return `Isso mesmo${nome}! Com esses 5 documentos na mão a gente faz a conferência no Santander, formaliza a operação e já dá entrada na sua liberação.`;
+    default:
+      return `Entendo perfeitamente${nome}! Só queria te mostrar porque hoje o banco tá ganhando muito em cima de você com essa taxa de 2,x%. A gente derruba pra 1,40% pra esse lucro voltar pro seu bolso agora, sem subir nada na parcela.`;
+  }
+}
+
 /* ------------------------------------------------------------------
    A escolha
 ------------------------------------------------------------------ */
 
 /*
   Dada a situação, existe resposta determinística? Devolve o texto ou null.
-
-  `null` NÃO significa falha — significa que este caso precisa de linguagem
-  de verdade, e quem chamou decide o que fazer (tentar a IA, ou mandar pra
-  Fila com o aviso).
-
-  A ordem é do mais específico pro mais genérico. `vouVerificar` fica de
-  fora de propósito: ele não é resposta, é aviso, e quem decide usá-lo é o
-  orquestrador quando tudo o mais falhou.
 */
 export function respostaDeterministica({
   categoria,
@@ -304,11 +329,16 @@ export function respostaDeterministica({
   nomeCliente = null,
   pedido = null,
   fatosNovos = null,
+  objecao = null,
   semente,
 }) {
   let texto = null;
+  let ehObjecao = false;
 
-  if (categoria === "saudacao") {
+  if (categoria === "objecao" || objecao) {
+    texto = respostaObjecao(objecao?.tipo, nomeCliente);
+    ehObjecao = true;
+  } else if (categoria === "saudacao") {
     texto = saudacao(mensagemCliente, nomeCliente, semente);
   } else if (pedido?.texto) {
     texto = pedirOQueFalta(pedido, nomeCliente);
@@ -316,28 +346,17 @@ export function respostaDeterministica({
     texto = informacaoRecebida(fatosNovos, nomeCliente);
   }
 
-  return conferido(texto);
+  return conferido(texto, { permitirPersuasao: ehObjecao });
 }
 
 /*
-  A última porta deste arquivo. Frase que eu escrevi e que ainda assim soa
-  como dinheiro não sai — nem que eu tenha escrito com a melhor das
-  intenções. O texto de hoje não é o texto de daqui a seis meses.
-*/
-/*
-  Os rótulos que o próprio `requisitos.js` produz. "Extrato de margem" tem
-  a palavra "margem", que é gatilho de dinheiro — e é assim que o produto
-  já pede esse documento hoje.
-
-  A distinção que importa: PEDIR o extrato de margem não é falar de margem.
-  Uma é uma frase de código pedindo um papel; a outra seria o bot dizendo
-  quanto o cliente tem. O que separa as duas, aqui, é a procedência — este
-  texto veio de `REQUISITOS`, não de modelo nenhum.
+  A última porta deste arquivo.
 */
 const ROTULOS_DE_REQUISITO = Object.values(REQUISITOS).map((r) => r.rotulo);
 
-export function conferido(texto) {
+export function conferido(texto, { permitirPersuasao = false } = {}) {
   if (!texto || !texto.trim()) return null;
+  if (permitirPersuasao) return texto;
 
   /*
     Número é o corte que não tem exceção. Nenhuma frase deste arquivo

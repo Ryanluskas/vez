@@ -70,8 +70,8 @@ export function TrocaDeTema() {
   return (
     <div
       role="group"
-      aria-label="Tema"
-      className="inline-flex rounded-md border border-fio p-0.5"
+      aria-label="Tema da interface"
+      className="inline-flex rounded-xl border border-fio bg-sup2 p-1 shadow-inner"
     >
       {(["escuro", "claro"] as const).map((t) => (
         <button
@@ -80,11 +80,13 @@ export function TrocaDeTema() {
           onClick={() => aplicar(t)}
           aria-pressed={tema === t}
           className={cn(
-            "rounded-[5px] px-3 py-1 text-[12px] capitalize transition-colors",
-            tema === t ? "bg-sup2 text-texto" : "text-texto2 hover:text-texto"
+            "rounded-lg px-3 py-1 text-[12px] font-medium capitalize transition-all cursor-pointer select-none",
+            tema === t
+              ? "bg-sup text-texto shadow-sm border border-fio"
+              : "text-texto3 hover:text-texto"
           )}
         >
-          {t}
+          {t === "escuro" ? "🌙 Escuro" : "☀️ Claro"}
         </button>
       ))}
     </div>

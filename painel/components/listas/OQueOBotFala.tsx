@@ -49,7 +49,7 @@ export function OQueOBotFala({
         {!temLista ? " Sem lista ativa, nada disso vale: tudo continua indo pra Fila." : ""}
       </p>
 
-      <div className="grid gap-px overflow-hidden rounded-lg border border-fio bg-fio sm:grid-cols-2">
+      <div className="grid gap-px overflow-hidden rounded-2xl border border-fio bg-fio sm:grid-cols-2 shadow-sm">
         {CAMPOS_DA_LISTA.map((campo) => (
           <label
             key={campo.chave}
@@ -79,7 +79,7 @@ export function OQueOBotFala({
 
       {/* ---------------------------------------------------- porcentagem */}
 
-      <div className="mt-4 rounded-lg border border-fio bg-sup p-4">
+      <div className="mt-4 rounded-2xl border border-fio bg-sup/50 backdrop-blur-xl p-5 shadow-sm">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <label className="flex items-center gap-2">
             <span className="text-[13px] text-texto">O cliente ouve</span>
@@ -118,9 +118,9 @@ export function OQueOBotFala({
         <button
           type="submit"
           disabled={salvando || !valido}
-          className="h-8 rounded-md bg-jade px-4 text-[13px] text-fundo transition-colors hover:bg-jade-forte disabled:opacity-50"
+          className="h-10 rounded-xl bg-jade px-4 text-[13px] font-medium text-jade-texto shadow-sm transition-all hover:bg-jade-forte active:scale-[0.98] disabled:opacity-40 cursor-pointer"
         >
-          {salvando ? "Salvando…" : "Salvar"}
+          {salvando ? "Salvando…" : "Salvar Configuração"}
         </button>
 
         {estado.ok ? <span className="text-[12px] text-jade">Salvo.</span> : null}

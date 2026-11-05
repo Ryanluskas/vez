@@ -7,6 +7,7 @@ import {
   normalizarTelefone,
   montarValores,
   emTexto,
+  calcularReducaoCapitalCred,
 } from "../src/lista.js";
 import { conferir } from "../src/numeros.js";
 
@@ -197,4 +198,43 @@ test("planilha sem as colunas esperadas não inventa campo", () => {
 test("linha vazia não quebra", () => {
   assert.deepEqual(montarValores({}, { campos: ["reducao_total"] }).valores, {});
   assert.deepEqual(montarValores(null, { campos: [] }).valores, {});
+});
+
+/* ------------------------------------------------------------- regra Capital Cred */
+
+test("calcularReducaoCapitalCred aplica divisão determinística sem cálculo por IA", () => {
+  // Redução abaixo de R$ 8.000: 62% cliente / 38% empresa
+  const r1 = calcularReducaoCapitalCred(6000);
+  assert.equal(r1.valorTotal, 6000);
+  assert.equal(r1.cliente, 3720.00); // 6000 * 0.62
+  assert.equal(r1.empresa, 2280.00); // 6000 * 0.38
+  assert.equal(r1.percentualCliente, 62);
+  assert.equal(r1.percentualEmpresa, 38);
+  assert.equal(r1.clienteFormatado, "R$ 3.720,00");
+
+  // Redução a partir de R$ 8.000: 50% cliente / 50% empresa
+  const r2 = calcularReducaoCapitalCred(9000);
+  assert.equal(r2.valorTotal, 9000);
+  assert.equal(r2.cliente, 4500.00); // 9000 * 0.50
+  assert.equal(r2.empresa, 4500.00); // 9000 * 0.50
+  assert.equal(r2.percentualCliente, 50);
+  assert.equal(r2.percentualEmpresa, 50);
+  assert.equal(r2.clienteFormatado, "R$ 4.500,00");
+
+  // Exato no limiar de R$ 8.000
+  const r3 = calcularReducaoCapitalCred(8000);
+  assert.equal(r3.cliente, 4000.00);
+  assert.equal(r3.empresa, 4000.00);
+});
+
+test("montarValores com porcentagem='capitalcred' aplica regra 50/50 e 62/38", () => {
+  // Linha com Reducao_Total = 6000 (< 8000 -> 62% = 3720)
+  const l1 = { Reducao_Total: 6000 };
+  const v1 = montarValores(l1, { campos: ["reducao_total"], porcentagem: "capitalcred" });
+  assert.equal(v1.valores.reducao_total, "R$ 3.720,00");
+
+  // Linha com Reducao_Total = 10000 (>= 8000 -> 50% = 5000)
+  const l2 = { Reducao_Total: 10000 };
+  const v2 = montarValores(l2, { campos: ["reducao_total"], porcentagem: "capitalcred" });
+  assert.equal(v2.valores.reducao_total, "R$ 5.000,00");
 });

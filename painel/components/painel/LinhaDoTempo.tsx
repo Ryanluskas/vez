@@ -47,7 +47,7 @@ function hora(iso: string) {
 
 export function LinhaDoTempo({ eventos }: { eventos: EventoDoAgente[] }) {
   return (
-    <div className="border-b border-fio">
+    <div className="rounded-2xl border border-fio bg-sup/50 backdrop-blur-xl p-5 divide-y divide-fio/40 space-y-3 shadow-sm">
       {eventos.map((e) => {
         const quem = e.conversas?.nome ?? e.conversas?.telefone ?? null;
         const falhou = !e.ok || e.tipo === "erro";
@@ -55,7 +55,7 @@ export function LinhaDoTempo({ eventos }: { eventos: EventoDoAgente[] }) {
         return (
           <article
             key={e.id}
-            className="flex items-start gap-3 border-t border-fio py-2.5"
+            className="flex items-start gap-3 pt-2.5 first:pt-0"
           >
             <span className="num shrink-0 pt-[3px] text-[11px] text-texto3">
               {hora(e.criado_em)}

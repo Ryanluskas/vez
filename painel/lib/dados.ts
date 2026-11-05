@@ -3,6 +3,7 @@ import { criarClienteServidor } from "@/lib/supabase/servidor";
 export type ResumoDoPainel = {
   abertas: number;
   rascunhos: number;
+  followups: number;
   bancoPronto: boolean;
 };
 
@@ -14,7 +15,7 @@ export type ResumoDoPainel = {
 export async function resumoDoPainel(): Promise<ResumoDoPainel> {
   const supabase = await criarClienteServidor();
 
-  const [fila, rascunhos] = await Promise.all([
+  const [fila, rascunhos, followups] = await Promise.all([
     supabase
       .from("pendencias")
       .select("id", { count: "exact", head: true })
@@ -23,15 +24,20 @@ export async function resumoDoPainel(): Promise<ResumoDoPainel> {
       .from("rascunhos")
       .select("id", { count: "exact", head: true })
       .eq("status", "pendente"),
+    supabase
+      .from("solicitacoes_followup")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "pendente"),
   ]);
 
   if (fila.error || rascunhos.error) {
-    return { abertas: 0, rascunhos: 0, bancoPronto: false };
+    return { abertas: 0, rascunhos: 0, followups: 0, bancoPronto: false };
   }
 
   return {
     abertas: fila.count ?? 0,
     rascunhos: rascunhos.count ?? 0,
+    followups: followups.error ? 0 : (followups.count ?? 0),
     bancoPronto: true,
   };
 }
@@ -50,6 +56,9 @@ export type Conexao = {
   aparelho: string | null;
   detalhe: string | null;
   vistoEm: string | null;
+  tipoProvedor?: "evolution" | "wwebjs";
+  evolutionInstancia?: string | null;
+  evolutionServerUrl?: string | null;
   /* Importação: pedida (dias > 0) e em andamento (total != null). */
   importarDias: number;
   importarTotal: number | null;
@@ -70,12 +79,28 @@ export async function conexoesDoUsuario(): Promise<{
 }> {
   const supabase = await criarClienteServidor();
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("conexoes")
     .select(
-      "id, apelido, ativa, desconectar_pedido, estado, qr, telefone, aparelho, detalhe, visto_em, importar_dias, importar_total, importar_feitas"
+      "id, apelido, ativa, desconectar_pedido, estado, qr, telefone, aparelho, detalhe, visto_em, importar_dias, importar_total, importar_feitas, tipo_provedor, evolution_instancia, evolution_server_url"
     )
     .order("apelido");
+
+  if (error && error.message.includes("evolution_instancia")) {
+    const resLegado = await supabase
+      .from("conexoes")
+      .select(
+        "id, apelido, ativa, desconectar_pedido, estado, qr, telefone, aparelho, detalhe, visto_em, importar_dias, importar_total, importar_feitas"
+      )
+      .order("apelido");
+    data = (resLegado.data ?? []).map((l) => ({
+      ...l,
+      tipo_provedor: "evolution",
+      evolution_instancia: null,
+      evolution_server_url: null,
+    }));
+    error = resLegado.error;
+  }
 
   if (error) return { conexoes: [], tabelaPronta: false };
 
@@ -95,6 +120,9 @@ export async function conexoesDoUsuario(): Promise<{
       aparelho: linha.aparelho,
       detalhe: recente ? linha.detalhe : "O motor parou de responder nesta máquina.",
       vistoEm: linha.visto_em,
+      tipoProvedor: linha.tipo_provedor ?? "evolution",
+      evolutionInstancia: linha.evolution_instancia,
+      evolutionServerUrl: linha.evolution_server_url,
       importarDias: linha.importar_dias ?? 0,
       importarTotal: recente ? linha.importar_total : null,
       importarFeitas: linha.importar_feitas ?? 0,
@@ -248,4 +276,250 @@ export async function motivosDeHandoff(): Promise<MotivoDeHandoff[]> {
 
   if (error) return [];
   return data ?? [];
+}
+
+/* ------------------------------------------------------------------
+   Follow-ups supervisionados
+------------------------------------------------------------------ */
+
+export type FollowupPendente = {
+  id: string;
+  id_conversa: string;
+  mensagem_sugerida: string;
+  motivo: string;
+  estagio_comercial: string | null;
+  tentativa: number;
+  momento_recomendado: string | null;
+  criado_em: string;
+  conversas: { nome: string | null; telefone: string; etapa: string } | null;
+};
+
+export async function followupsPendentes(): Promise<{
+  followups: FollowupPendente[];
+  tabelaPronta: boolean;
+}> {
+  const supabase = await criarClienteServidor();
+
+  const { data, error } = await supabase
+    .from("solicitacoes_followup")
+    .select(
+      "id, id_conversa, mensagem_sugerida, motivo, estagio_comercial, tentativa, momento_recomendado, criado_em, conversas(nome, telefone, etapa)"
+    )
+    .eq("status", "pendente")
+    .order("criado_em", { ascending: true })
+    .returns<FollowupPendente[]>();
+
+  if (error) return { followups: [], tabelaPronta: false };
+  return { followups: data ?? [], tabelaPronta: true };
+}
+
+/* ------------------------------------------------------------------
+   Configuração e Consumo de IA Multiprovedor
+------------------------------------------------------------------ */
+
+export type ConfigIAPainel = {
+  id?: string;
+  provedor_primario: string;
+  modelo_primario: string;
+  provedor_secundario: string | null;
+  modelo_secundario: string | null;
+  fallback_ativo: boolean;
+  temperatura: number;
+  max_tokens: number;
+};
+
+export async function obterConfigIA(): Promise<ConfigIAPainel> {
+  const supabase = await criarClienteServidor();
+
+  const { data, error } = await supabase
+    .from("config_ia")
+    .select("*")
+    .maybeSingle();
+
+  if (error || !data) {
+    return {
+      provedor_primario: "gemini",
+      modelo_primario: "gemini-3.5-flash-lite",
+      provedor_secundario: "openai",
+      modelo_secundario: "gpt-4o-mini",
+      fallback_ativo: true,
+      temperatura: 0.2,
+      max_tokens: 400,
+    };
+  }
+
+  return {
+    id: data.id,
+    provedor_primario: data.provedor_primario,
+    modelo_primario: data.modelo_primario,
+    provedor_secundario: data.provedor_secundario,
+    modelo_secundario: data.modelo_secundario,
+    fallback_ativo: data.fallback_ativo ?? true,
+    temperatura: data.temperatura ?? 0.2,
+    max_tokens: data.max_tokens ?? 400,
+  };
+}
+
+export type ConsumoIARegistro = {
+  id: string;
+  provedor: string;
+  modelo: string;
+  operacao: string;
+  tokens_entrada: number;
+  tokens_saida: number;
+  tokens_total?: number;
+  custo_estimado: number;
+  latencia_ms: number;
+  sucesso: boolean;
+  foi_fallback?: boolean;
+  criado_em: string;
+};
+
+export async function obterConsumoIARecente(limite = 30): Promise<{
+  consumos: ConsumoIARegistro[];
+  custoTotalHojeUsd: number;
+}> {
+  const supabase = await criarClienteServidor();
+
+  const { data, error } = await supabase
+    .from("consumo_ia")
+    .select("id, provedor, modelo, operacao, tokens_entrada, tokens_saida, tokens_total, custo_estimado, latencia_ms, sucesso, foi_fallback, criado_em")
+    .order("criado_em", { ascending: false })
+    .limit(limite)
+    .returns<ConsumoIARegistro[]>();
+
+  if (error || !data) {
+    return { consumos: [], custoTotalHojeUsd: 0 };
+  }
+
+  const hoje = new Date().toISOString().slice(0, 10);
+  const custoTotalHojeUsd = data
+    .filter((c) => c.criado_em?.startsWith(hoje))
+    .reduce((acc, c) => acc + (Number(c.custo_estimado) || 0), 0);
+
+  return { consumos: data, custoTotalHojeUsd };
+}
+
+export type MetricasOperacao = {
+  totalConversas: number;
+  conversasEmAndamento: number;
+  aguardandoConsultor: number;
+  assumidasConsultor: number;
+  leadsQuentes: number;
+  leadsMornos: number;
+  leadsFrios: number;
+  followupsPendentes: number;
+  mensagensEnviadas: number;
+  mensagensRecebidas: number;
+  conexoesAtivas: number;
+  totalConexoes: number;
+  motorLigado: boolean;
+  provedorIaAtivo: string;
+  modeloIaAtivo: string;
+};
+
+export async function obterMetricasOperacao(): Promise<MetricasOperacao> {
+  const supabase = await criarClienteServidor();
+
+  const [
+    conversasRes,
+    pendenciasRes,
+    followupsRes,
+    mensagensEnvRes,
+    mensagensRecRes,
+    conexoesRes,
+    configIaRes,
+    motorNoAr,
+  ] = await Promise.all([
+    supabase
+      .from("conversas")
+      .select("id, estagio, qualificacao, so_voce"),
+    supabase
+      .from("pendencias")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "aberta"),
+    supabase
+      .from("solicitacoes_followup")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "pendente"),
+    supabase
+      .from("mensagens")
+      .select("id", { count: "exact", head: true })
+      .eq("direcao", "enviada"),
+    supabase
+      .from("mensagens")
+      .select("id", { count: "exact", head: true })
+      .eq("direcao", "recebida"),
+    conexoesDoUsuario(),
+    obterConfigIA(),
+    algumMotorLigado(),
+  ]);
+
+  const conversas = conversasRes.data ?? [];
+  const totalConversas = conversas.length;
+  const conversasEmAndamento = conversas.filter((c) => c.estagio === "aguardando_bot").length;
+  const aguardandoConsultor = pendenciasRes.count ?? conversas.filter((c) => c.estagio === "aguardando_voce").length;
+  const assumidasConsultor = conversas.filter((c) => Boolean(c.so_voce)).length;
+  const leadsQuentes = conversas.filter((c) => c.qualificacao === "quente").length;
+  const leadsMornos = conversas.filter((c) => c.qualificacao === "morna").length;
+  const leadsFrios = conversas.filter((c) => c.qualificacao === "fria").length;
+
+  const conexoesAtivas = conexoesRes.conexoes.filter((c) => c.ligado).length;
+
+  return {
+    totalConversas,
+    conversasEmAndamento,
+    aguardandoConsultor,
+    assumidasConsultor,
+    leadsQuentes,
+    leadsMornos,
+    leadsFrios,
+    followupsPendentes: followupsRes.count ?? 0,
+    mensagensEnviadas: mensagensEnvRes.count ?? 0,
+    mensagensRecebidas: mensagensRecRes.count ?? 0,
+    conexoesAtivas,
+    totalConexoes: conexoesRes.conexoes.length,
+    motorLigado: motorNoAr,
+    provedorIaAtivo: configIaRes.provedor_primario,
+    modeloIaAtivo: configIaRes.modelo_primario,
+  };
+}
+
+export type MensagemItem = {
+  id: string;
+  direcao: "recebida" | "enviada";
+  texto: string;
+  criado_em: string;
+};
+
+export type FatoMemoria = {
+  chave: string;
+  valor: string;
+  confianca?: number;
+};
+
+export async function obterMensagensDaConversa(
+  idConversa: string
+): Promise<MensagemItem[]> {
+  const supabase = await criarClienteServidor();
+  const { data } = await supabase
+    .from("mensagens")
+    .select("id, direcao, texto, criado_em")
+    .eq("id_conversa", idConversa)
+    .order("criado_em", { ascending: true })
+    .limit(200);
+
+  return (data as MensagemItem[]) ?? [];
+}
+
+export async function obterFatosDaConversa(
+  idConversa: string
+): Promise<FatoMemoria[]> {
+  const supabase = await criarClienteServidor();
+  const { data } = await supabase
+    .from("memoria")
+    .select("chave, valor, confianca")
+    .eq("id_conversa", idConversa);
+
+  return (data as FatoMemoria[]) ?? [];
 }

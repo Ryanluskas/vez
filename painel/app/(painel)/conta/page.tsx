@@ -22,7 +22,7 @@ export default async function PaginaDaConta() {
     <Tela>
       <CabecalhoDeTela titulo="Conta" linha="Quem está logado neste painel." />
 
-      <dl className="border-t border-fio">
+      <dl className="rounded-2xl border border-fio bg-sup/50 backdrop-blur-xl p-5 divide-y divide-fio/40 space-y-2">
         <Linha rotulo="E-mail">{usuario?.email}</Linha>
         <Linha rotulo="Conta criada em">
           {usuario?.created_at
@@ -33,7 +33,7 @@ export default async function PaginaDaConta() {
               })
             : "—"}
         </Linha>
-        <Linha rotulo="Tema">
+        <Linha rotulo="Tema da Interface">
           <TrocaDeTema />
         </Linha>
       </dl>
@@ -81,9 +81,9 @@ export default async function PaginaDaConta() {
 
 function Linha({ rotulo, children }: { rotulo: string; children: React.ReactNode }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-fio py-3.5">
-      <dt className="text-[13px] text-texto2">{rotulo}</dt>
-      <dd className="text-[13px] text-texto">{children}</dd>
+    <div className="flex flex-wrap items-center justify-between gap-3 py-2.5 first:pt-0">
+      <dt className="text-[13px] text-texto2 font-medium">{rotulo}</dt>
+      <dd className="text-[13px] text-texto font-mono">{children}</dd>
     </div>
   );
 }

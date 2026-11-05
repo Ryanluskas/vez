@@ -51,11 +51,16 @@ function limpar(valor, permitidos) {
 
 export function criarMemoria(supabase, userId) {
   async function ler(idConversa) {
-    const { data } = await supabase
+    let query = supabase
       .from("memoria")
       .select("*")
-      .eq("id_conversa", idConversa)
-      .maybeSingle();
+      .eq("id_conversa", idConversa);
+
+    if (userId && typeof query.eq === "function") {
+      query = query.eq("user_id", userId);
+    }
+
+    const { data } = await query.maybeSingle();
     return data ?? null;
   }
 

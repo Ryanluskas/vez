@@ -72,33 +72,13 @@ export const CAMPOS_DA_LISTA = {
 
 export const CHAVES_DOS_CAMPOS = Object.keys(CAMPOS_DA_LISTA);
 
-/* ------------------------------------------------------------------
-   Números
------------------------------------------------------------------- */
+import {
+  comoNumero,
+  comoDinheiro,
+  calcularReducaoCapitalCred,
+} from "./comercial/calculadora.js";
 
-/*
-  A planilha mistura formatos: `Reducao_Total` vem como número (3174.54) e
-  `Margem_Livre` vem como texto ("R$ 1.150,94"). Ler os dois do mesmo jeito
-  é o que evita um "R$ 1150,94" virar 115094.
-*/
-export function comoNumero(bruto) {
-  if (bruto === null || bruto === undefined || bruto === "") return null;
-  if (typeof bruto === "number") return Number.isFinite(bruto) ? bruto : null;
-
-  const limpo = String(bruto)
-    .replace(/[^\d,.-]/g, "")
-    .replace(/\.(?=\d{3}\b)/g, "")
-    .replace(",", ".");
-
-  const n = Number(limpo);
-  return Number.isFinite(n) ? n : null;
-}
-
-/* R$ 1.150,94 — do jeito que se escreve no WhatsApp. */
-export function comoDinheiro(n) {
-  if (n === null) return null;
-  return `R$ ${n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+export { comoNumero, comoDinheiro, calcularReducaoCapitalCred };
 
 /*
   O telefone da planilha vira o mesmo formato que o WhatsApp entrega.
@@ -146,6 +126,7 @@ function contratosDe(dados) {
 
   `porcentagem` é multiplicação: 66 sobre 100 dá 66. O consultor pensa nisso
   como "eu passo 66 pro cliente", e é assim que ele configura no painel.
+  Também aceita "capitalcred" ou função para cálculo dinâmico da regra 50/50 e 62/38.
 */
 export function montarValores(dados, { campos = [], porcentagem = 100 } = {}) {
   const liberados = new Set(campos);
@@ -174,7 +155,16 @@ export function montarValores(dados, { campos = [], porcentagem = 100 } = {}) {
       A redução sai reduzida. O modelo recebe o número já final e não sabe
       que existiu outro — não há como ele "arredondar de volta".
     */
-    const valor = def.aplicaPorcentagem ? (cru * porcentagem) / 100 : cru;
+    let valor = cru;
+    if (def.aplicaPorcentagem) {
+      if (porcentagem === "capitalcred" || porcentagem === "dinamica") {
+        valor = cru >= 8000 ? cru * 0.5 : cru * 0.62;
+      } else if (typeof porcentagem === "function") {
+        valor = porcentagem(cru);
+      } else {
+        valor = (cru * Number(porcentagem)) / 100;
+      }
+    }
 
     const texto = def.tipo === "dinheiro" ? comoDinheiro(valor) : String(Math.round(valor));
     valores[chave] = texto;

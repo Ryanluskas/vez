@@ -1,108 +1,69 @@
 import type { Metadata } from "next";
-import { CabecalhoDeTela, Tela } from "@/components/ui/Tela";
-import { OlhoNaConexao } from "@/components/painel/OlhoNaConexao";
 import { CartaoDeNumero } from "@/components/conexao/CartaoDeNumero";
 import { AdicionarNumero } from "@/components/conexao/AdicionarNumero";
-import { usuarioAtual } from "@/lib/supabase/servidor";
+import { DiagnosticoWebhook } from "@/components/conexao/DiagnosticoWebhook";
+import { ControleAgenteGlobal } from "@/components/conexao/ControleAgenteGlobal";
 import { conexoesDoUsuario } from "@/lib/dados";
+import { Cpu } from "lucide-react";
 
-export const metadata: Metadata = { title: "Conexão" };
+export const metadata: Metadata = {
+  title: "WhatsApp & Evolution · Vez",
+  description: "Gerenciamento de instâncias e conexões Evolution API v2",
+};
 
 export default async function PaginaDeConexao() {
-  const [usuario, { conexoes, tabelaPronta }] = await Promise.all([
-    usuarioAtual(),
-    conexoesDoUsuario(),
-  ]);
+  const { conexoes } = await conexoesDoUsuario();
 
   const algumLigado = conexoes.some((c) => c.ligado);
   const ativos = conexoes.filter((c) => c.ativa).length;
 
-  if (!tabelaPronta) {
-    return (
-      <Tela>
-        <CabecalhoDeTela
-          titulo="Conexão"
-          linha="Falta uma parte do banco para esta tela funcionar."
-        />
-        <div className="rounded-lg border border-fio bg-sup p-5">
-          <p className="text-[13px] leading-relaxed text-texto2">
-            Rode <code className="num text-texto">banco/07_varios_numeros.sql</code> no
-            SQL Editor do Supabase e recarregue.
-          </p>
-        </div>
-      </Tela>
-    );
-  }
-
   return (
-    <Tela>
-      <CabecalhoDeTela
-        titulo="Conexão"
-        linha="Seus números de WhatsApp. O motor roda no seu computador — as mensagens dos seus clientes não passam por servidor nenhum."
-        rotulo={conexoes.length > 1 ? `${ativos} ativos` : undefined}
-      />
+    <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-8 sm:py-8 space-y-8 select-none">
+      <div>
+        <div className="flex items-center gap-2">
+          <span className="text-[12px] font-mono uppercase tracking-wider text-jade font-semibold">
+            Gateway de Comunicação
+          </span>
+          <span className="h-1 w-1 rounded-full bg-texto3" />
+          <span className="text-[12px] text-texto3">Evolution API v2.2.3</span>
+        </div>
+        <h1 className="mt-1 font-display text-[28px] sm:text-[32px] font-bold tracking-tight text-texto">
+          Gerenciador WhatsApp
+        </h1>
+        <p className="mt-1 text-[14px] text-texto2">
+          Instâncias conectadas, leitura de QR Code em tempo real e diagnóstico de webhooks.
+        </p>
+      </div>
 
-      <div className="flex flex-col gap-3">
+      {/* Controle de Ativação do Agente e Marco Temporal */}
+      <ControleAgenteGlobal />
+
+      {/* Lista de Instâncias */}
+      <div className="space-y-4">
         {conexoes.map((c) => (
           <CartaoDeNumero key={c.id} conexao={c} />
         ))}
       </div>
 
+      {/* Adicionar Nova Instância */}
       <AdicionarNumero quantos={ativos} />
 
-      {!algumLigado ? (
-        <section className="mt-8">
-          <span className="rotulo">Ligar o motor</span>
-          <ol className="mt-3 space-y-4">
-            <Passo n={1} titulo="Dois cliques no atalho Vez">
-              Ele está na sua Área de Trabalho. Sobe o painel e o motor juntos, e a
-              janela que fica aberta é a do motor — é nela que aparece o log.
-            </Passo>
-            <Passo n={2} titulo="Entrar com esta conta">
-              O motor faz login com{" "}
-              <span className="num text-texto">{usuario?.email}</span>. É isso que
-              amarra o WhatsApp desta máquina aos seus dados.
-            </Passo>
-            <Passo n={3} titulo="Escanear o QR de cada número">
-              Ele aparece no cartão aqui em cima. No celular: WhatsApp → Aparelhos
-              conectados → Conectar um aparelho.
-            </Passo>
-          </ol>
-        </section>
-      ) : null}
+      {/* Diagnóstico de Webhooks */}
+      <DiagnosticoWebhook />
 
-      <p className="mt-8 border-t border-fio pt-5 text-[12px] leading-relaxed text-texto3">
-        O motor roda local porque o WhatsApp Web e a IA exigem uma máquina ligada. É
-        isso que mantém as conversas dos seus clientes dentro do seu computador e a IA
-        sem mensalidade.
-      </p>
-
-      <OlhoNaConexao
-        conectado={algumLigado}
-        importando={conexoes.some(
-          (c) => c.importarDias > 0 || c.importarTotal !== null
-        )}
-      />
-    </Tela>
-  );
-}
-
-function Passo({
-  n,
-  titulo,
-  children,
-}: {
-  n: number;
-  titulo: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <li className="flex gap-3.5">
-      <span className="num mt-0.5 shrink-0 text-[12px] text-texto3">{n}</span>
-      <div className="min-w-0">
-        <p className="text-[14px] text-texto">{titulo}</p>
-        <div className="mt-1 text-[13px] leading-relaxed text-texto2">{children}</div>
-      </div>
-    </li>
+      {/* Guia de Inicialização do Gateway */}
+      {!algumLigado && (
+        <div className="rounded-2xl border border-fio bg-sup/40 p-6 space-y-3">
+          <h4 className="font-display text-[15px] font-semibold text-texto tracking-tight flex items-center gap-2">
+            <Cpu className="h-4 w-4 text-jade" />
+            Como inicializar a Evolution API
+          </h4>
+          <p className="text-[13px] text-texto2 leading-relaxed">
+            Se a Evolution API estiver rodando via Docker, execute <code className="font-mono text-texto bg-sup2 px-2 py-0.5 rounded-md">docker compose up -d</code>. 
+            Caso queira rodar diretamente no Windows sem contêineres, adicione <code className="font-mono text-texto bg-sup2 px-2 py-0.5 rounded-md">VEZ_GATEWAY=legacy</code> no arquivo <code className="font-mono">motor/.env</code>.
+          </p>
+        </div>
+      )}
+    </div>
   );
 }

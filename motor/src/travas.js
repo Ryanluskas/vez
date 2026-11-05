@@ -41,7 +41,7 @@ export function criarTravas() {
 
     let liberar;
     const minhaVez = new Promise((r) => (liberar = r));
-    const minhaEntrada = anterior.then(() => minhaVez);
+    const minhaEntrada = anterior.catch(() => {}).then(() => minhaVez);
     filas.set(idConversa, minhaEntrada);
 
     await anterior.catch(() => {});

@@ -2,13 +2,17 @@ import { lerAmbiente } from "./ambiente.js";
 import { criarClienteDoMotor, entrarNaConta } from "./supabase.js";
 import { criarFluxo } from "./fluxo.js";
 import { criarMaestro } from "./conexoes.js";
+import { criarMaestroEvolution } from "./evolution/maestro.js";
+import { criarServidorWebhook } from "./evolution/webhook.js";
+import { criarMaestroPlaywright } from "./provedores/maestro_playwright.js";
+import { obterTipoProvedorConfigurado } from "./provedores/gestor_provedor.js";
 import { criarEscuta } from "./escuta.js";
 import { criarSeguimento } from "./seguimento.js";
 import { pegarTrava, soltarTrava } from "./instancia.js";
 import { criarObservador, EVENTOS } from "./observar.js";
 import { criarBatimento } from "./batimento.js";
-import { ondeCadaCoisaRoda } from "./ia.js";
-import { groqVivo, groqConfigurado } from "./groq.js";
+import { ondeCadaCoisaRoda, gestorMultiprovedor } from "./ia.js";
+import { groqVivo, groqConfigurado, modeloDoGroq } from "./groq.js";
 import {
   ollamaVivo,
   modeloDisponivel,
@@ -24,16 +28,29 @@ import { log } from "./log.js";
   e o consultor atende na mao. Melhor um bot que nao ajuda do que um que chuta.
 */
 async function conferirIa() {
-  if (!(await ollamaVivo())) {
+  const ollamaOnline = await ollamaVivo();
+  const temNuvem = groqConfigurado || gestorMultiprovedor.obterProvedor("gemini")?.estaConfigurado();
+
+  if (!ollamaOnline) {
+    if (temNuvem) {
+      log.info(`IA Local (Ollama) desligada. Operando com provedor em nuvem (${groqConfigurado ? modeloDoGroq + " via Groq" : "Gestor Multiprovedor"}).`);
+      return true;
+    }
+
     log.destaque(
-      `⚠  Ollama não está rodando em ${enderecoDoOllama}.\n` +
+      `⚠  Ollama não está rodando em ${enderecoDoOllama} e nenhum provedor em nuvem (Groq/Gemini) foi configurado.\n` +
         `   O motor vai funcionar, mas TUDO vai para a Fila — nada será respondido sozinho.\n` +
-        `   Para ligar a IA: instale o Ollama e rode "ollama pull ${modeloEmUso}".`
+        `   Para ligar a IA: configure GROQ_API_KEY no .env ou instale o Ollama.`
     );
     return false;
   }
 
   if (!(await modeloDisponivel())) {
+    if (temNuvem) {
+      log.info(`Modelo local ${modeloEmUso} ausente. Usando nuvem (${groqConfigurado ? modeloDoGroq : "Multiprovedor"}).`);
+      return true;
+    }
+
     log.destaque(
       `⚠  Ollama está de pé, mas o modelo ${modeloEmUso} não foi baixado.\n` +
         `   Rode: ollama pull ${modeloEmUso}\n` +
@@ -42,16 +59,10 @@ async function conferirIa() {
     return false;
   }
 
-  /*
-    Confere o Groq AQUI, e não na primeira mensagem de cliente. Chave
-    errada ou cota estourada é coisa que o consultor precisa saber no boot,
-    com a máquina na frente dele — não vinte minutos depois, quando um
-    cliente já está esperando e a única pista é uma linha no log.
-  */
   if (groqConfigurado && !(await groqVivo())) {
     log.alerta(
-      `A chave do Groq não foi aceita. Vou escrever com o modelo local (${modeloEmUso}), ` +
-        `que escreve pior. Confira GROQ_API_KEY no .env.`
+      `A chave do Groq não foi aceita. Vou escrever com o modelo local (${modeloEmUso}). ` +
+        `Confira GROQ_API_KEY no .env.`
     );
   }
 
@@ -59,8 +70,6 @@ async function conferirIa() {
   log.info(`Pensa com ${onde.pensa} · escreve com ${onde.escreve}`);
   log.info(`IA pronta: ${modeloEmUso}. Carregando na memória…`);
 
-  // Enquanto o WhatsApp ainda nem abriu, ninguem esta esperando resposta.
-  // E a hora certa de pagar o custo de carregar o modelo.
   const segundos = await aquecer();
   if (segundos === null) {
     log.alerta("Não consegui aquecer o modelo; a primeira resposta vai demorar.");
@@ -107,6 +116,10 @@ async function principal() {
   const usuario = await entrarNaConta(supabase, ambiente);
   log.info(`Conta: ${usuario.email}`);
 
+  // Sincroniza configuração de IA multiprovedor com o painel e conecta telemetria
+  gestorMultiprovedor.conectarBanco({ supabase, userId: usuario.id });
+  await gestorMultiprovedor.sincronizarComBanco(supabase, usuario.id);
+
   const iaPronta = await conferirIa();
   const pararDeAquecer = iaPronta ? manterQuente() : () => {};
 
@@ -120,12 +133,44 @@ async function principal() {
   const pararBatimento = batimento.ligar();
 
   const fluxo = criarFluxo(supabase, usuario.id, { observador });
-  const maestro = criarMaestro({
-    supabase,
-    fluxo,
-    userId: usuario.id,
-    aoMudarEstado: (estado, detalhe) => batimento.marcar(estado, detalhe),
-  });
+
+  const tipoProvedor = obterTipoProvedorConfigurado();
+  const usarEvolution = tipoProvedor === "evolution";
+  let webhookServidor = null;
+  let maestro = null;
+
+  if (usarEvolution) {
+    log.destaque("Gateway: Evolution API v2 (desacoplada via Docker)");
+    maestro = criarMaestroEvolution({
+      supabase,
+      userId: usuario.id,
+      aoMudarEstado: (estado, detalhe) => batimento.marcar(estado, detalhe),
+    });
+
+    const webhook = criarServidorWebhook({
+      fluxo,
+      supabase,
+      porta: Number(process.env.VEZ_WEBHOOK_PORT) || 3333,
+      webhookSecret: process.env.VEZ_WEBHOOK_SECRET || null,
+      aoAtualizarEstado: (instancia, estado, qr) => {
+        batimento.marcar(estado, `Instância: ${instancia}`);
+        if (maestro?.notificarMudancaDeInstancia) {
+          maestro.notificarMudancaDeInstancia(instancia, estado);
+        }
+      },
+    });
+
+    webhookServidor = webhook.iniciar();
+  } else {
+    log.destaque("Gateway: WhatsApp Web via Playwright (Chromium Nativo)");
+    maestro = criarMaestroPlaywright({
+      supabase,
+      userId: usuario.id,
+      fluxo,
+      aoMudarEstado: (estado, detalhe) => batimento.marcar(estado, detalhe),
+      headless: process.env.WHATSAPP_WEB_HEADLESS === "true",
+    });
+  }
 
   /*
     A escuta do painel e o follow-up sobem junto com o motor, nao junto com
@@ -150,6 +195,11 @@ async function principal() {
     desligarEscuta?.();
     desligarSeguimento?.();
     pararDeAquecer();
+    if (webhookServidor) {
+      try {
+        webhookServidor.close();
+      } catch {}
+    }
     await maestro.desligarTudo();
     // O diário sai por último: ele tem que registrar o que aconteceu até agora.
     await observador.terminar();

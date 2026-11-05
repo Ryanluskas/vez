@@ -47,7 +47,7 @@ export function Conhecimento({ fatos }: { fatos: Fato[] }) {
         </div>
       ) : null}
 
-      <form action={criar} ref={form} className="mt-4">
+      <form action={criar} ref={form} className="mt-4 space-y-2.5">
         <input
           name="assunto"
           required
@@ -57,8 +57,8 @@ export function Conhecimento({ fatos }: { fatos: Fato[] }) {
           disabled={criando}
           aria-label="Assunto do fato"
           className={cn(
-            "h-9 w-full rounded-md border border-fio bg-sup px-3 text-[13px] text-texto",
-            "transition-colors hover:border-fio-forte focus:border-jade focus:outline-none"
+            "h-10 w-full rounded-xl border border-fio bg-sup2 px-3.5 text-[14px] text-texto placeholder:text-texto3",
+            "transition-colors hover:border-fio-forte focus:border-jade focus:bg-sup focus:outline-none focus:ring-2 focus:ring-jade/20"
           )}
         />
         <textarea
@@ -70,19 +70,19 @@ export function Conhecimento({ fatos }: { fatos: Fato[] }) {
           disabled={criando}
           aria-label="Conteúdo do fato"
           className={cn(
-            "mt-2 w-full resize-y rounded-md border border-fio bg-sup px-3 py-2.5 text-[13px] leading-relaxed text-texto",
-            "transition-colors hover:border-fio-forte focus:border-jade focus:outline-none"
+            "w-full resize-y rounded-xl border border-fio bg-sup2 px-3.5 py-2.5 text-[14px] leading-relaxed text-texto placeholder:text-texto3",
+            "transition-colors hover:border-fio-forte focus:border-jade focus:bg-sup focus:outline-none focus:ring-2 focus:ring-jade/20"
           )}
         />
         <button
           type="submit"
           disabled={criando}
           className={cn(
-            "mt-2 h-9 rounded-md border border-fio bg-sup px-3.5 text-[13px] text-texto",
-            "transition-colors hover:border-fio-forte hover:bg-sup2 disabled:opacity-45"
+            "h-10 shrink-0 rounded-xl bg-jade px-4 text-[13px] font-medium text-jade-texto shadow-sm cursor-pointer",
+            "transition-all duration-150 hover:bg-jade-forte active:scale-[0.98] disabled:opacity-40"
           )}
         >
-          {criando ? "Salvando…" : "Adicionar fato"}
+          {criando ? "Salvando…" : "Adicionar Fato ao Manual"}
         </button>
         {novo.erro ? (
           <p role="alert" className="mt-2 text-[12px] leading-relaxed text-erro">

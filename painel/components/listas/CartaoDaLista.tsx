@@ -18,7 +18,7 @@ export function CartaoDaLista({ lista }: { lista: Lista }) {
   const [, apagar] = useActionState(apagarLista, {} as Resultado);
 
   return (
-    <article className="flex flex-wrap items-center justify-between gap-3 border-t border-fio py-3">
+    <article className="rounded-2xl border border-fio bg-sup/50 backdrop-blur-xl p-4 sm:p-5 flex flex-wrap items-center justify-between gap-3 shadow-sm hover:border-fio-forte transition-all">
       <div className={cn("min-w-0 flex-1", !lista.ativa && "opacity-50")}>
         <div className="flex flex-wrap items-center gap-x-3">
           <span className="text-[14px] text-texto">{lista.nome}</span>

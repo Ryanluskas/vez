@@ -58,8 +58,8 @@ export function Atalhos({ atalhos }: { atalhos: Atalho[] }) {
             disabled={criando}
             aria-label="Nome do atalho"
             className={cn(
-              "h-9 w-full rounded-md border border-fio bg-sup px-3 text-[13px] text-texto sm:w-44",
-              "transition-colors hover:border-fio-forte focus:border-jade focus:outline-none"
+              "h-10 w-full rounded-xl border border-fio bg-sup2 px-3.5 text-[14px] text-texto sm:w-48 placeholder:text-texto3",
+              "transition-colors hover:border-fio-forte focus:border-jade focus:bg-sup focus:outline-none focus:ring-2 focus:ring-jade/20"
             )}
           />
           <input
@@ -67,23 +67,23 @@ export function Atalhos({ atalhos }: { atalhos: Atalho[] }) {
             required
             maxLength={500}
             autoComplete="off"
-            placeholder="O que ele escreve na caixa"
+            placeholder="O que ele escreve na caixa de resposta"
             disabled={criando}
             aria-label="Texto do atalho"
             className={cn(
-              "h-9 min-w-0 flex-1 rounded-md border border-fio bg-sup px-3 text-[13px] text-texto",
-              "transition-colors hover:border-fio-forte focus:border-jade focus:outline-none"
+              "h-10 min-w-0 flex-1 rounded-xl border border-fio bg-sup2 px-3.5 text-[14px] text-texto placeholder:text-texto3",
+              "transition-colors hover:border-fio-forte focus:border-jade focus:bg-sup focus:outline-none focus:ring-2 focus:ring-jade/20"
             )}
           />
           <button
             type="submit"
             disabled={criando}
             className={cn(
-              "h-9 shrink-0 rounded-md border border-fio bg-sup px-3.5 text-[13px] text-texto",
-              "transition-colors hover:border-fio-forte hover:bg-sup2 disabled:opacity-45"
+              "h-10 shrink-0 rounded-xl bg-jade px-4 text-[13px] font-medium text-jade-texto shadow-sm cursor-pointer",
+              "transition-all duration-150 hover:bg-jade-forte active:scale-[0.98] disabled:opacity-40"
             )}
           >
-            {criando ? "Salvando…" : "Adicionar"}
+            {criando ? "Salvando…" : "Adicionar Atalho"}
           </button>
         </div>
         {novo.erro ? (

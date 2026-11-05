@@ -1,6 +1,5 @@
 import { cn } from "@/lib/cn";
 
-/* Erro e confirmacao usam a mesma caixa. Sem icone, sem "ops", sem desculpa. */
 export function Aviso({
   tom = "erro",
   children,
@@ -12,10 +11,10 @@ export function Aviso({
     <p
       role={tom === "erro" ? "alert" : "status"}
       className={cn(
-        "rounded-md border px-3 py-2.5 text-[13px] leading-relaxed",
+        "rounded-xl border px-3.5 py-2.5 text-[13px] leading-relaxed shadow-sm font-medium",
         tom === "erro"
-          ? "border-erro/40 bg-erro-fundo text-erro"
-          : "border-jade/40 bg-jade-fundo text-jade"
+          ? "border-erro/30 bg-erro-fundo text-erro"
+          : "border-jade/30 bg-jade-fundo text-jade"
       )}
     >
       {children}

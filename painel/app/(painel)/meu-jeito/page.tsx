@@ -47,13 +47,13 @@ export default async function PaginaMeuJeito() {
 
       {exemplos.length === 0 ? (
         <Vazio
-          titulo="O bot ainda não conhece seu jeito"
-          corpo="Não tem treinamento nem mensalidade: toda vez que você aprova uma resposta, ela vira exemplo aqui. O bot lê os exemplos da mesma categoria antes de escrever a próxima."
+          titulo="O bot ainda não tem exemplos gravados"
+          corpo="Toda vez que você aprova ou edita uma resposta na Fila ou em Rascunhos, ela se transforma automaticamente em repertório de aprendizado para a IA."
         />
       ) : (
-        <div className="border-b border-fio">
+        <div className="rounded-2xl border border-fio bg-sup/50 backdrop-blur-xl p-5 divide-y divide-fio/40 space-y-4">
           {exemplos.map((e) => (
-            <article key={e.id} className="border-t border-fio py-4">
+            <article key={e.id} className="pt-3 first:pt-0">
               <div className="flex items-center justify-between gap-4">
                 <span className="rotulo">{e.categoria}</span>
                 <ApagarExemplo id={e.id} />

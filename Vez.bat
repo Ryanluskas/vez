@@ -27,6 +27,15 @@ if not exist "motor\node_modules" (
   call npm install --prefix motor --silent
 )
 
+REM ---- limpa processos anteriores que possam ter ficado orfaos ----
+taskkill /FI "WINDOWTITLE eq Vez - painel*" /T /F >nul 2>nul
+
+REM ---- acorda a Evolution API no WSL Ubuntu (igual ao whatsapp-simulacoes-bot) ----
+where wsl >nul 2>nul
+if not errorlevel 1 (
+  start /min "" wsl -d Ubuntu --exec true
+)
+
 REM ---- compila o painel se ainda nao tiver sido compilado ----
 if not exist "painel\.next\BUILD_ID" (
   echo   Compilando o painel...
@@ -51,6 +60,8 @@ if errorlevel 1 (
   echo   O painel demorou demais pra subir. Confira a janela "Vez - painel".
 ) else (
   start "" http://localhost:3000
+  REM ---- abre o WhatsApp Web para acompanhar os atendimentos em tempo real ----
+  start "" https://web.whatsapp.com
 )
 
 echo.

@@ -1,5 +1,7 @@
 "use server";
 
+import crypto from "node:crypto";
+
 import { revalidatePath } from "next/cache";
 import { criarClienteServidor, usuarioAtual } from "@/lib/supabase/servidor";
 import { ETAPAS, type Etapa } from "@/lib/tipos";
@@ -340,7 +342,7 @@ export async function criarConexao(
   const supabase = await criarClienteServidor();
   const { error } = await supabase
     .from("conexoes")
-    .insert({ user_id: usuario.id, apelido, estado: "desligado" });
+    .insert({ user_id: usuario.id, apelido, estado: "desligado", ativa: true });
 
   if (error) {
     return {
@@ -458,7 +460,63 @@ export async function apagarConexao(
 
   const supabase = await criarClienteServidor();
 
-  // As conversas ficam: o histórico daquele número não some junto.
+  // 1. Busca a conexão para remover da Evolution API caso exista
+  const { data: cx } = await supabase
+    .from("conexoes")
+    .select("evolution_instancia")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (cx?.evolution_instancia) {
+    try {
+      const serverUrl = process.env.EVOLUTION_SERVER_URL || "http://localhost:8080";
+      const apiKey =
+        process.env.EVOLUTION_API_KEY ||
+        "fbd3fd31e1aa735f2c29d050fea8ec3d53777bdb2539fe8fed0f4af4b2cda32c";
+      await fetch(`${serverUrl}/instance/delete/${cx.evolution_instancia}`, {
+        method: "DELETE",
+        headers: { apikey: apiKey },
+      });
+    } catch {}
+  }
+
+  // 2. Remove referências filhas e desata conflitos de chave única antes da exclusão
+  await supabase.from("solicitacoes_followup").delete().eq("id_conexao", id);
+
+  // Busca conversas ligadas a esta conexão
+  const { data: convsConexao } = await supabase
+    .from("conversas")
+    .select("id, telefone")
+    .eq("id_conexao", id);
+
+  if (convsConexao && convsConexao.length > 0) {
+    const telefones = convsConexao.map((c) => c.telefone);
+
+    // Identifica se já existem conversas com id_conexao IS NULL para esses mesmos telefones
+    const { data: convsSemConexao } = await supabase
+      .from("conversas")
+      .select("id, telefone")
+      .is("id_conexao", null)
+      .in("telefone", telefones);
+
+    const telefonesConflitantes = new Set(
+      (convsSemConexao || []).map((c) => c.telefone)
+    );
+
+    // Se houver conflito de chave única (user_id, null, telefone), apaga as conversas conflitantes da conexão
+    const idsParaApagar = convsConexao
+      .filter((c) => telefonesConflitantes.has(c.telefone))
+      .map((c) => c.id);
+
+    if (idsParaApagar.length > 0) {
+      await supabase.from("conversas").delete().in("id", idsParaApagar);
+    }
+
+    // Para as demais, remove diretamente desta conexão
+    await supabase.from("conversas").delete().eq("id_conexao", id);
+  }
+
+  // 3. Remove a linha em conexões
   const { error } = await supabase.from("conexoes").delete().eq("id", id);
   if (error) return { erro: `Não consegui apagar: ${error.message}` };
 
@@ -789,5 +847,662 @@ export async function apagarExemplo(
   if (error) return { erro: `Não consegui apagar: ${error.message}` };
 
   revalidatePath("/meu-jeito");
+  return { ok: true };
+}
+
+
+/* ------------------------------------------------------------------
+   Follow-ups supervisionados — aprovar (com edição opcional) ou rejeitar
+------------------------------------------------------------------ */
+
+export async function aprovarFollowup(
+  _anterior: Resultado,
+  dados: FormData
+): Promise<Resultado> {
+  const id = texto(dados, "id");
+  const textoEditado = texto(dados, "texto");
+
+  if (!id) return { erro: "Follow-up não identificado." };
+
+  let usuario;
+  try {
+    usuario = await exigirLogin();
+  } catch (e) {
+    return { erro: (e as Error).message };
+  }
+
+  const supabase = await criarClienteServidor();
+
+  // 1. Autorização estrita e conferência de propriedade
+  const { data: sol, error: erroBusca } = await supabase
+    .from("solicitacoes_followup")
+    .select("id, user_id, mensagem_sugerida, status")
+    .eq("id", id)
+    .eq("user_id", usuario.id)
+    .maybeSingle();
+
+  if (erroBusca || !sol) {
+    return { erro: "Solicitação não encontrada ou acesso não autorizado." };
+  }
+
+  if (sol.status !== "pendente") {
+    return { erro: `Esta solicitação já está com status '${sol.status}' e não pode ser aprovada.` };
+  }
+
+  const textoFinal = (textoEditado || sol.mensagem_sugerida || "").trim();
+  if (!textoFinal) {
+    return { erro: "A mensagem de follow-up não pode ser vazia." };
+  }
+
+  const agora = new Date().toISOString();
+  // 2. Vinculação criptográfica SHA-256 do texto exato aprovado
+  const hashAprovacao = crypto.createHash("sha256").update(textoFinal).digest("hex");
+
+  const mudancas: Record<string, unknown> = {
+    status: "aprovada",
+    mensagem_aprovada: textoFinal,
+    hash_aprovacao: hashAprovacao,
+    aprovado_em: agora,
+    aprovado_por: usuario.id,
+    atualizado_em: agora,
+  };
+
+  const { error } = await supabase
+    .from("solicitacoes_followup")
+    .update(mudancas)
+    .eq("id", id)
+    .eq("user_id", usuario.id)
+    .eq("status", "pendente");
+
+  if (error) return { erro: `Não consegui aprovar o follow-up: ${error.message}` };
+
+  revalidatePath("/followups");
+  revalidatePath("/conversas");
+  return { ok: true };
+}
+
+export async function rejeitarFollowup(
+  _anterior: Resultado,
+  dados: FormData
+): Promise<Resultado> {
+  const id = texto(dados, "id");
+  const motivo = texto(dados, "motivo") || "Descartado pelo consultor";
+
+  if (!id) return { erro: "Follow-up não identificado." };
+
+  let usuario;
+  try {
+    usuario = await exigirLogin();
+  } catch (e) {
+    return { erro: (e as Error).message };
+  }
+
+  const supabase = await criarClienteServidor();
+  const agora = new Date().toISOString();
+
+  const { error } = await supabase
+    .from("solicitacoes_followup")
+    .update({
+      status: "rejeitada",
+      rejeicao_motivo: motivo,
+      atualizado_em: agora,
+    })
+    .eq("id", id)
+    .eq("user_id", usuario.id)
+    .eq("status", "pendente");
+
+  if (error) return { erro: `Não consegui rejeitar o follow-up: ${error.message}` };
+
+  revalidatePath("/followups");
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------
+   Configuração Multiprovedor de Inteligência Artificial
+------------------------------------------------------------------ */
+
+export async function salvarConfigIA(
+  _anterior: Resultado,
+  dados: FormData
+): Promise<Resultado> {
+  let usuario;
+  try {
+    usuario = await exigirLogin();
+  } catch (e) {
+    return { erro: (e as Error).message };
+  }
+
+  const provedorPrimario = texto(dados, "provedor_primario") || "gemini";
+  const modeloPrimario = texto(dados, "modelo_primario") || "gemini-2.5-flash";
+  const provedorSecundario = texto(dados, "provedor_secundario") || null;
+  const modeloSecundario = texto(dados, "modelo_secundario") || null;
+  const fallbackAtivo = dados.get("fallback_ativo") === "on" || dados.get("fallback_ativo") === "true";
+  const temperatura = parseFloat(texto(dados, "temperatura")) || 0.2;
+  const maxTokens = parseInt(texto(dados, "max_tokens"), 10) || 400;
+
+  const supabase = await criarClienteServidor();
+  const agora = new Date().toISOString();
+
+  const payload = {
+    user_id: usuario.id,
+    provedor_primario: provedorPrimario,
+    modelo_primario: modeloPrimario,
+    provedor_secundario: provedorSecundario,
+    modelo_secundario: modeloSecundario,
+    fallback_ativo: fallbackAtivo,
+    temperatura,
+    max_tokens: maxTokens,
+    atualizado_em: agora,
+  };
+
+  const { error } = await supabase
+    .from("config_ia")
+    .upsert(payload, { onConflict: "user_id" });
+
+  if (error) return { erro: `Não consegui salvar a configuração de IA: ${error.message}` };
+
+  revalidatePath("/ia");
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------
+   Atendimento — Enviar mensagem manual do consultor
+   Cria rascunho com status 'aprovado' para o motor disparar via WhatsApp.
+------------------------------------------------------------------ */
+
+export async function enviarMensagemManual(
+  _anterior: Resultado,
+  dados: FormData
+): Promise<Resultado> {
+  const idConversa = texto(dados, "id_conversa");
+  const mensagemTexto = texto(dados, "mensagem");
+
+  if (!idConversa || !mensagemTexto) {
+    return { erro: "Conversa ou mensagem não preenchida." };
+  }
+
+  let usuario;
+  try {
+    usuario = await exigirLogin();
+  } catch (e) {
+    return { erro: (e as Error).message };
+  }
+
+  const supabase = await criarClienteServidor();
+
+  // Insere como rascunho aprovado para o motor enviar via WhatsApp com segurança
+  const { error } = await supabase.from("rascunhos").insert({
+    user_id: usuario.id,
+    id_conversa: idConversa,
+    texto_sugerido: mensagemTexto.trim(),
+    status: "aprovado",
+    categoria: "consultor",
+  });
+
+  if (error) {
+    return { erro: `Não consegui enfileirar mensagem: ${error.message}` };
+  }
+
+  revalidatePath("/conversas");
+  revalidatePath("/fila");
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------
+   Atendimento — Alternar controle humano (Assumir vs Devolver ao Vez)
+------------------------------------------------------------------ */
+
+export async function alternarControleHumano(
+  _anterior: Resultado,
+  dados: FormData
+): Promise<Resultado> {
+  const idConversa = texto(dados, "id_conversa");
+  const assumir = texto(dados, "assumir") === "true";
+
+  if (!idConversa) return { erro: "Conversa não identificada." };
+
+  let usuario;
+  try {
+    usuario = await exigirLogin();
+  } catch (e) {
+    return { erro: (e as Error).message };
+  }
+
+  const supabase = await criarClienteServidor();
+
+  const { error } = await supabase
+    .from("conversas")
+    .update({
+      so_voce: assumir,
+      estagio: assumir ? "aguardando_voce" : "aguardando_bot",
+      escalonamentos: assumir ? 1 : 0,
+    })
+    .eq("id", idConversa)
+    .eq("user_id", usuario.id);
+
+  if (error) return { erro: `Erro ao alternar controle: ${error.message}` };
+
+  revalidatePath("/conversas");
+  revalidatePath("/fila");
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------
+   CRM — Atualizar qualificação de lead (SPIN Selling)
+------------------------------------------------------------------ */
+
+export async function atualizarQualificacaoLead(
+  _anterior: Resultado,
+  dados: FormData
+): Promise<Resultado> {
+  const idConversa = texto(dados, "id_conversa");
+  const qualificacao = texto(dados, "qualificacao");
+
+  if (!idConversa || !qualificacao) {
+    return { erro: "Dados incompletos para qualificação." };
+  }
+
+  let usuario;
+  try {
+    usuario = await exigirLogin();
+  } catch (e) {
+    return { erro: (e as Error).message };
+  }
+
+  const supabase = await criarClienteServidor();
+
+  const { error } = await supabase
+    .from("conversas")
+    .update({ qualificacao })
+    .eq("id", idConversa)
+    .eq("user_id", usuario.id);
+
+  if (error) return { erro: `Erro ao atualizar lead: ${error.message}` };
+
+  revalidatePath("/conversas");
+  revalidatePath("/clientes");
+  revalidatePath("/visao-geral");
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------
+   CRM — Atualizar etapa do funil comercial (8 estágios CapitalCred)
+------------------------------------------------------------------ */
+
+export async function atualizarEtapaComercial(
+  _anterior: Resultado,
+  dados: FormData
+): Promise<Resultado> {
+  const idConversa = texto(dados, "id_conversa");
+  const novaEtapa = texto(dados, "etapa") as Etapa;
+
+  if (!idConversa || !novaEtapa) {
+    return { erro: "Identificação da conversa ou etapa ausente." };
+  }
+
+  let usuario;
+  try {
+    usuario = await exigirLogin();
+  } catch (e) {
+    return { erro: (e as Error).message };
+  }
+
+  const supabase = await criarClienteServidor();
+
+  const { error } = await supabase
+    .from("conversas")
+    .update({
+      etapa: novaEtapa,
+      atualizado_em: new Date().toISOString(),
+    })
+    .eq("id", idConversa)
+    .eq("user_id", usuario.id);
+
+  if (error) return { erro: `Erro ao atualizar etapa comercial: ${error.message}` };
+
+  revalidatePath("/conversas");
+  revalidatePath("/clientes");
+  revalidatePath("/visao-geral");
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------
+   LGPD — Registrar Opt-Out (Descadastrar cliente por solicitação)
+------------------------------------------------------------------ */
+
+export async function registrarOptOut(
+  _anterior: Resultado,
+  dados: FormData
+): Promise<Resultado> {
+  const idConversa = texto(dados, "id_conversa");
+  const motivo = texto(dados, "motivo") || "solicitado_pelo_consultor";
+
+  if (!idConversa) return { erro: "Conversa não identificada." };
+
+  let usuario;
+  try {
+    usuario = await exigirLogin();
+  } catch (e) {
+    return { erro: (e as Error).message };
+  }
+
+  const supabase = await criarClienteServidor();
+  const agoraIso = new Date().toISOString();
+
+  const { error } = await supabase
+    .from("conversas")
+    .update({
+      opt_out: true,
+      opt_out_em: agoraIso,
+      motivo_opt_out: motivo,
+      atender: false,
+      seguir: false,
+      etapa: "perdido",
+      motivo_perda: "opt_out_lgpd",
+      atualizado_em: agoraIso,
+    })
+    .eq("id", idConversa)
+    .eq("user_id", usuario.id);
+
+  if (error) return { erro: `Erro ao registrar opt-out: ${error.message}` };
+
+  // Cancela quaisquer follow-ups em aberto para o número
+  try {
+    await supabase
+      .from("solicitacoes_followup")
+      .update({
+        status: "cancelada",
+        rejeicao_motivo: "Cliente em opt-out LGPD",
+        atualizado_em: agoraIso,
+      })
+      .eq("id_conversa", idConversa)
+      .in("status", ["pendente", "aprovada"]);
+  } catch {}
+
+  revalidatePath("/conversas");
+  revalidatePath("/clientes");
+  revalidatePath("/visao-geral");
+  revalidatePath("/followups");
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------
+   LGPD — Reativar contato (Remover Opt-Out quando autorizado)
+------------------------------------------------------------------ */
+
+export async function removerOptOut(
+  _anterior: Resultado,
+  dados: FormData
+): Promise<Resultado> {
+  const idConversa = texto(dados, "id_conversa");
+
+  if (!idConversa) return { erro: "Conversa não identificada." };
+
+  let usuario;
+  try {
+    usuario = await exigirLogin();
+  } catch (e) {
+    return { erro: (e as Error).message };
+  }
+
+  const supabase = await criarClienteServidor();
+
+  const { error } = await supabase
+    .from("conversas")
+    .update({
+      opt_out: false,
+      opt_out_em: null,
+      motivo_opt_out: null,
+      atender: true,
+      seguir: true,
+      etapa: "primeiro_atendimento",
+      atualizado_em: new Date().toISOString(),
+    })
+    .eq("id", idConversa)
+    .eq("user_id", usuario.id);
+
+  if (error) return { erro: `Erro ao remover opt-out: ${error.message}` };
+
+  revalidatePath("/conversas");
+  revalidatePath("/clientes");
+  revalidatePath("/visao-geral");
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------
+   Agente Global — Ativar / Pausar com marco temporal confiável
+------------------------------------------------------------------ */
+
+export async function alternarAgenteGlobal(
+  _anterior: Resultado,
+  dados: FormData
+): Promise<Resultado> {
+  const acao = texto(dados, "acao"); // "ativar" ou "pausar"
+
+  let usuario;
+  try {
+    usuario = await exigirLogin();
+  } catch (e) {
+    return { erro: (e as Error).message };
+  }
+
+  const supabase = await criarClienteServidor();
+  const agoraIso = new Date().toISOString();
+  const ativo = acao === "ativar";
+
+  // Grava marco temporal no banco (conexoes ou batimentos)
+  const { error } = await supabase
+    .from("conexoes")
+    .update({
+      agente_ativo: ativo,
+      marco_ativacao: ativo ? agoraIso : null,
+      atualizado_em: agoraIso,
+    })
+    .eq("user_id", usuario.id);
+
+  if (error && !error.message.includes("agente_ativo")) {
+    return { erro: `Erro ao alterar estado do agente: ${error.message}` };
+  }
+
+  revalidatePath("/conexao");
+  revalidatePath("/conversas");
+  revalidatePath("/visao-geral");
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------
+   Conversa — Pausar / Retomar IA Individual (IA Ativa vs IA Pausada)
+------------------------------------------------------------------ */
+
+export async function alternarPausaConversa(
+  _anterior: Resultado,
+  dados: FormData
+): Promise<Resultado> {
+  const idConversa = texto(dados, "id_conversa");
+  const atender = dados.get("atender") === "true";
+
+  if (!idConversa) return { erro: "Conversa não identificada." };
+
+  let usuario;
+  try {
+    usuario = await exigirLogin();
+  } catch (e) {
+    return { erro: (e as Error).message };
+  }
+
+  const supabase = await criarClienteServidor();
+
+  // Se o cliente estiver em opt-out formal, a trava de compliance impede reativação sem consentimento
+  if (atender) {
+    const { data: conv } = await supabase
+      .from("conversas")
+      .select("opt_out")
+      .eq("id", idConversa)
+      .single();
+
+    if (conv?.opt_out) {
+      return { erro: "Cliente em opt-out LGPD. Exige reativação explícita de consentimento." };
+    }
+  }
+
+  const { error } = await supabase
+    .from("conversas")
+    .update({
+      atender,
+      atualizado_em: new Date().toISOString(),
+    })
+    .eq("id", idConversa)
+    .eq("user_id", usuario.id);
+
+  if (error) return { erro: `Erro ao pausar/retomar IA: ${error.message}` };
+
+  revalidatePath("/conversas");
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------
+   Conversa — Marcar como "Não Responder"
+------------------------------------------------------------------ */
+
+export async function marcarNaoResponder(
+  _anterior: Resultado,
+  dados: FormData
+): Promise<Resultado> {
+  const idConversa = texto(dados, "id_conversa");
+  if (!idConversa) return { erro: "Conversa não identificada." };
+
+  let usuario;
+  try {
+    usuario = await exigirLogin();
+  } catch (e) {
+    return { erro: (e as Error).message };
+  }
+
+  const supabase = await criarClienteServidor();
+  const { error } = await supabase
+    .from("conversas")
+    .update({
+      atender: false,
+      seguir: false,
+      atualizado_em: new Date().toISOString(),
+    })
+    .eq("id", idConversa)
+    .eq("user_id", usuario.id);
+
+  if (error) return { erro: `Erro ao marcar não responder: ${error.message}` };
+
+  revalidatePath("/conversas");
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------
+   Conversa — Arquivar
+------------------------------------------------------------------ */
+
+export async function arquivarConversa(
+  _anterior: Resultado,
+  dados: FormData
+): Promise<Resultado> {
+  const idConversa = texto(dados, "id_conversa");
+  if (!idConversa) return { erro: "Conversa não identificada." };
+
+  let usuario;
+  try {
+    usuario = await exigirLogin();
+  } catch (e) {
+    return { erro: (e as Error).message };
+  }
+
+  const supabase = await criarClienteServidor();
+  const { error } = await supabase
+    .from("conversas")
+    .update({
+      etapa: "perdido",
+      motivo_perda: "arquivada_pelo_operador",
+      atender: false,
+      seguir: false,
+      atualizado_em: new Date().toISOString(),
+    })
+    .eq("id", idConversa)
+    .eq("user_id", usuario.id);
+
+  if (error) return { erro: `Erro ao arquivar conversa: ${error.message}` };
+
+  revalidatePath("/conversas");
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------
+   Conversa — Salvar Observação Interna
+------------------------------------------------------------------ */
+
+export async function salvarObservacaoInterna(
+  _anterior: Resultado,
+  dados: FormData
+): Promise<Resultado> {
+  const idConversa = texto(dados, "id_conversa");
+  const observacoes = texto(dados, "observacoes");
+
+  if (!idConversa) return { erro: "Conversa não identificada." };
+
+  let usuario;
+  try {
+    usuario = await exigirLogin();
+  } catch (e) {
+    return { erro: (e as Error).message };
+  }
+
+  const supabase = await criarClienteServidor();
+  const { error } = await supabase
+    .from("conversas")
+    .update({
+      observacoes,
+      atualizado_em: new Date().toISOString(),
+    })
+    .eq("id", idConversa)
+    .eq("user_id", usuario.id);
+
+  if (error) return { erro: `Erro ao salvar observação: ${error.message}` };
+
+  revalidatePath("/conversas");
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------
+   Exclusão Local no Vez (NUNCA toca no WhatsApp externo)
+------------------------------------------------------------------ */
+
+export async function excluirConversaLocal(
+  _anterior: Resultado,
+  dados: FormData
+): Promise<Resultado> {
+  const idConversa = texto(dados, "id_conversa");
+  const confirmacao = texto(dados, "confirmacao");
+
+  if (!idConversa) return { erro: "Conversa não identificada." };
+  if (confirmacao !== "EXCLUIR_LOCAL") {
+    return { erro: "Confirmação de exclusão local obrigatória." };
+  }
+
+  let usuario;
+  try {
+    usuario = await exigirLogin();
+  } catch (e) {
+    return { erro: (e as Error).message };
+  }
+
+  const supabase = await criarClienteServidor();
+  // Exclui apenas do banco local do Vez; mensagens vinculadas sofrem cascade
+  const { error } = await supabase
+    .from("conversas")
+    .delete()
+    .eq("id", idConversa)
+    .eq("user_id", usuario.id);
+
+  if (error) return { erro: `Erro ao excluir registro local: ${error.message}` };
+
+  revalidatePath("/conversas");
+  revalidatePath("/clientes");
+  revalidatePath("/visao-geral");
   return { ok: true };
 }

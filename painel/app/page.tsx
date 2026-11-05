@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
 
-/* A raiz nao tem tela propria: o produto comeca na Fila.
-   Quem nao esta logado e desviado pro /entrar no proxy.ts. */
+/* A raiz direciona o consultor para a Visão Geral Executiva do Vez */
 export default function Raiz() {
-  redirect("/fila");
+  redirect("/visao-geral");
 }

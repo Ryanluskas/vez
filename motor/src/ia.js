@@ -2,7 +2,11 @@ import { gerar as gerarNoOllama, gerarJson as gerarJsonNoOllama } from "./ollama
 import { gerarNoGroq, groqConfigurado, modeloDoGroq } from "./groq.js";
 import { modeloEmUso as modeloLocal } from "./ollama.js";
 import { disjuntores, saudeDosServicos } from "./resiliencia.js";
+import { criarGestorIA } from "./ia/gestor.js";
 import { log } from "./log.js";
+
+export const gestorMultiprovedor = criarGestorIA();
+export { criarGestorIA };
 
 /*
   ============================================================================
@@ -41,10 +45,24 @@ import { log } from "./log.js";
 */
 
 export function ondeCadaCoisaRoda() {
+  const provedorGemini = gestorMultiprovedor.obterProvedor("gemini");
+  let escreve = `${modeloLocal} (local)`;
+  let pensa = `${modeloLocal} (local)`;
+
+  if (provedorGemini?.estaConfigurado()) {
+    escreve = `Gemini (${provedorGemini.modeloPadrao})`;
+  } else if (groqConfigurado) {
+    escreve = `${modeloDoGroq} (Groq)`;
+  }
+
+  if (groqConfigurado) {
+    pensa = `${modeloLocal} (com fallback Groq)`;
+  }
+
   return {
-    pensa: modeloLocal,
-    escreve: groqConfigurado ? `${modeloDoGroq} (Groq)` : `${modeloLocal} (local)`,
-    temModeloGrande: groqConfigurado,
+    pensa,
+    escreve,
+    temModeloGrande: groqConfigurado || Boolean(provedorGemini?.estaConfigurado()),
     saude: saudeDosServicos(),
   };
 }
@@ -72,44 +90,61 @@ function exigir(valor, oQue) {
 const pensarNaNuvem = process.env.VEZ_PENSAR_NA_NUVEM === "1";
 
 export async function pensar({ prompt, sistema }) {
-  /*
-    UMA tentativa, não duas. Com o corte de 12s, duas tentativas são 24
-    segundos de cliente esperando por uma classificação que o código já
-    resolveu na maioria dos casos antes de chegar aqui.
-  */
-  const r = await disjuntores.ollama.rodar(
-    async () => exigir(await gerarJsonNoOllama({ prompt, sistema }), "Ollama"),
-    { tentativas: 1 }
-  );
-
-  if (r.ok) return r.valor;
-
-  if (pensarNaNuvem && groqConfigurado) {
-    log.alerta("Modelo local falhou; classificando no Groq (VEZ_PENSAR_NA_NUVEM=1).");
-    const naNuvem = await disjuntores.groq.rodar(
-      async () => exigir(await gerarNoGroq({ prompt, sistema, json: true, temperatura: 0 }), "Groq"),
-      { tentativas: 1 }
-    );
-
-    if (naNuvem.ok) {
-      try {
-        return JSON.parse(naNuvem.valor);
-      } catch {
-        return null;
-      }
-    }
+  // 1. Tenta o modelo local (Ollama) se o disjuntor estiver normal
+  if (disjuntores.ollama.aberto === false) {
+    try {
+      const r = await disjuntores.ollama.rodar(
+        async () => exigir(await gerarJsonNoOllama({ prompt, sistema }), "Ollama"),
+        { tentativas: 1 }
+      );
+      if (r.ok && r.valor) return r.valor;
+    } catch {}
   }
 
-  // Null vira pendência lá em cima. Nunca vira palpite.
+  // 2. Se o local não responder, utiliza o Gestor Multiprovedor (Groq / Gemini / Cloud)
+  if (gestorMultiprovedor) {
+    try {
+      const rMulti = await gestorMultiprovedor.pensar({ prompt, sistema });
+      if (rMulti) {
+        return typeof rMulti === "object" ? rMulti : JSON.parse(rMulti);
+      }
+    } catch {}
+  }
+
+  // 3. Fallback no Groq direto se configurado
+  if (groqConfigurado) {
+    try {
+      const naNuvem = await disjuntores.groq.rodar(
+        async () => exigir(await gerarNoGroq({ prompt, sistema, json: true, temperatura: 0.1 }), "Groq"),
+        { tentativas: 1 }
+      );
+
+      if (naNuvem.ok && naNuvem.valor) {
+        return typeof naNuvem.valor === "object" ? naNuvem.valor : JSON.parse(naNuvem.valor);
+      }
+    } catch {}
+  }
+
+  // Null vira pendência segura na fila. Nunca inventa.
   return null;
 }
 
 /*
-  Redação. Tenta o modelo grande; se ele falhar por qualquer motivo — sem
-  chave, cota, rede, timeout, disjuntor aberto — cai no local em vez de
-  deixar o cliente sem resposta. Degradar é melhor que travar.
+  Redação. Tenta provedores modernos (Gemini/Claude/OpenAI); se não, tenta o
+  Groq; se falhar por qualquer motivo — sem chave, cota, rede, timeout,
+  disjuntor aberto — cai no local em vez de deixar o cliente sem resposta.
+  Degradar é melhor que travar.
 */
-export async function escrever({ prompt, sistema, temperatura = 0.4 }) {
+export async function escrever({ prompt, sistema, temperatura = 0.7 }) {
+  const provedorGemini = gestorMultiprovedor.obterProvedor("gemini");
+  const provedorOpenai = gestorMultiprovedor.obterProvedor("openai");
+  const provedorClaude = gestorMultiprovedor.obterProvedor("claude");
+
+  if (provedorGemini?.estaConfigurado() || provedorOpenai?.estaConfigurado() || provedorClaude?.estaConfigurado()) {
+    const textoGerado = await gestorMultiprovedor.escrever({ prompt, sistema, temperatura });
+    if (textoGerado) return textoGerado;
+  }
+
   if (groqConfigurado) {
     const r = await disjuntores.groq.rodar(
       async () => exigir(await gerarNoGroq({ prompt, sistema, temperatura }), "Groq"),

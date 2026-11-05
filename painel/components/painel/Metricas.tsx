@@ -31,7 +31,7 @@ export function Metricas({
 
   return (
     <section className="mb-6">
-      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-fio bg-fio sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-fio bg-fio sm:grid-cols-4 shadow-sm">
         <Numero
           rotulo="Chegaram"
           valor={metricas.recebidas}
@@ -75,7 +75,7 @@ export function Metricas({
       ) : null}
 
       {motivos.length ? (
-        <div className="mt-3 rounded-lg border border-fio bg-sup px-4 py-3">
+        <div className="mt-3 rounded-2xl border border-fio bg-sup/60 backdrop-blur-xl px-4 py-3.5 shadow-sm">
           <p className="rotulo mb-2">Por que o bot te chamou</p>
           <div className="flex flex-col gap-1">
             {motivos.map((m) => (

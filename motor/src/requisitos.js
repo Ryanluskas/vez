@@ -49,61 +49,42 @@ export const REQUISITOS = {
   },
   documento_foto: {
     rotulo: "documento com foto",
-    pedido: "me manda um documento com foto",
+    pedido: "você prefere me mandar a foto do documento (RG ou CNH frente e verso) agora ou prefere que eu te chame mais tarde para tirar com calma?",
     peso: 5,
   },
   comprovante_endereco: {
     rotulo: "comprovante de endereço",
-    pedido: "me manda um comprovante de endereço",
+    pedido: "me manda um comprovante de endereço atualizado",
     peso: 6,
+  },
+  numero_contrato: {
+    rotulo: "número do contrato",
+    pedido: "me passa o(s) número(s) do(s) contrato(s) do Santander que vamos refinanciar",
+    peso: 7,
   },
   conta_bancaria: {
     rotulo: "agência e conta",
     pedido: "me passa sua agência e conta",
-    peso: 7,
+    peso: 8,
   },
 };
 
-/*
-  O que cada situação exige. Listas curtas de propósito: pedir sete coisas
-  de uma vez faz o cliente sumir.
-*/
 const PARA_SIMULAR = ["convenio", "banco", "contracheque", "margem"];
-const PARA_FECHAR = [
-  ...PARA_SIMULAR,
+export const PARA_FECHAR = [
   "documento_foto",
   "comprovante_endereco",
-  "conta_bancaria",
+  "contracheque",
+  "margem",
+  "numero_contrato",
 ];
 
-/*
-  ============================================================================
-  QUANDO O CONSULTOR ABORDOU PRIMEIRO, ELE JÁ SABE
-
-  Prospecção não é atendimento. O consultor procurou aquela pessoa PORQUE
-  já viu o contrato dela — o banco, a margem, a oportunidade. A abordagem
-  diz isso na cara: "vi que seu contrato Santander tem margem pra reduzir".
-
-  Pedir contracheque e extrato de margem nesse momento é conversa errada.
-  O cliente acabou de ouvir que você já analisou o caso dele, e a resposta
-  à primeira pergunta que ele faz é um pedido de papel. Ele conclui, com
-  razão, que você não olhou nada.
-
-  Na prospecção o próximo passo é a SIMULAÇÃO, que é sua. Documento vem
-  depois de ele querer seguir — e aí faz todo sentido.
-  ============================================================================
-*/
 const PARA_SIMULAR_EM_PROSPECCAO = [];
 
 function exigidosPara(para, estado) {
   if (para === "fechar") return PARA_FECHAR;
 
-  /*
-    A etapa manda mais que a origem: se a negociação já chegou em
-    'documentos', é porque a simulação andou e agora papel é o assunto.
-  */
   const emProspeccao =
-    estado?.origem === "prospeccao" &&
+    (estado?.origem === "prospeccao" || estado?.operacao === "capitalcred") &&
     ["prospeccao", "interesse", "simulacao"].includes(estado?.etapa_comercial ?? "interesse");
 
   return emProspeccao ? PARA_SIMULAR_EM_PROSPECCAO : PARA_SIMULAR;
@@ -166,7 +147,8 @@ export function semRotulosDeRequisito(texto) {
   `objetivo` decide o tamanho da lista: quem só tirou uma dúvida não precisa
   mandar comprovante de endereço.
 */
-export function queFalta(memoria, { para = "simular" } = {}) {
+export function queFalta(memoria, opcoes = {}) {
+  const para = typeof opcoes === "string" ? opcoes : (opcoes?.para ?? "simular");
   /*
     A memoria carrega a etapa comercial junto. Quem abordou primeiro ja
     sabe o basico do cliente — pedir de novo e a conversa errada.
@@ -195,12 +177,26 @@ const DESISTIR_APOS = 2;
   Devolve null quando não há o que pedir, ou quando tudo que falta já foi
   pedido demais: aí o caso é do consultor, não do bot.
 */
-export function montarPedido(memoria, { para = "simular" } = {}) {
+export function montarPedido(memoria, opcoes = {}) {
+  const para = typeof opcoes === "string" ? opcoes : (opcoes?.para ?? "simular");
   const faltando = queFalta(memoria, { para }).filter(
     (chave) => quantasVezesPerguntei(memoria, chave) < DESISTIR_APOS
   );
 
   if (faltando.length === 0) return null;
+
+  if (para === "fechar") {
+    const textoCompleto =
+      `Para formalizar a liberação no Santander com segurança e emitir seu contrato digital, vou precisar desta documentação:\n\n` +
+      `• Documento com foto (RG ou CNH frente e verso)\n` +
+      `• Comprovante de endereço atualizado\n` +
+      `• Contracheque atualizado\n` +
+      `• Extrato de margem consignável\n` +
+      `• Número(s) do(s) contrato(s) do Santander que vamos refinanciar\n\n` +
+      `Você prefere me mandar a foto do documento agora ou prefere que eu te chame daqui a pouco para tirar com calma?`;
+
+    return { chaves: faltando, texto: textoCompleto, faltamAinda: 0 };
+  }
 
   const agora = faltando.slice(0, MAXIMO_POR_MENSAGEM);
   const pedidos = agora.map((c) => REQUISITOS[c].pedido);
@@ -219,6 +215,7 @@ export function montarPedido(memoria, { para = "simular" } = {}) {
   documento — e o que garante que o consultor só é chamado quando de fato
   só ele resolve.
 */
-export function prontoPara(memoria, { para = "simular" } = {}) {
+export function prontoPara(memoria, opcoes = {}) {
+  const para = typeof opcoes === "string" ? opcoes : (opcoes?.para ?? "simular");
   return queFalta(memoria, { para }).length === 0;
 }

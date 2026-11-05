@@ -78,7 +78,7 @@ export function ehAbordagem(texto) {
   if (t.length < 40) return false;
 
   const marcas = MARCAS_DA_ABORDAGEM.filter((m) => m.test(t)).length;
-  const propoe = /\bsimula[cç][aã]o\b|\breduzir a taxa\b|\bliberar um valor\b/i.test(t);
+  const propoe = /\bsimula[cç][aã]o\b|\breduzir a taxa\b|\bderrubar a taxa\b|\bliberar um valor\b|\bpossibilidade\b/i.test(t);
 
   return marcas >= 2 && propoe;
 }

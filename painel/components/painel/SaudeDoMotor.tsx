@@ -47,7 +47,7 @@ const NOME_DA_SAUDE: Record<string, string> = {
 export function SaudeDoMotor({ estado }: { estado: Estado }) {
   if (!estado.tabelaPronta) {
     return (
-      <div className="rounded-lg border border-fio bg-sup p-4">
+      <div className="rounded-2xl border border-fio bg-sup/60 backdrop-blur-xl p-5 shadow-sm">
         <p className="text-[13px] text-texto">Falta uma parte do banco pra ver o motor daqui.</p>
         <p className="mt-1 text-[12px] text-texto2">
           Rode <code className="num text-texto">banco/18_observabilidade.sql</code> no SQL Editor
@@ -61,7 +61,7 @@ export function SaudeDoMotor({ estado }: { estado: Estado }) {
   const servicos = Object.entries(estado.servicos);
 
   return (
-    <div className="rounded-lg border border-fio bg-sup p-4">
+    <div className="rounded-2xl border border-fio bg-sup/60 backdrop-blur-xl p-5 shadow-sm">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span aria-hidden="true" className={cn("h-2 w-2 shrink-0 rounded-full", visual.cor)} />
         <span className="text-[14px] text-texto">{visual.texto}</span>

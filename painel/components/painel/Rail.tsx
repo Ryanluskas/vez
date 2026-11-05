@@ -2,143 +2,148 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import {
+  LayoutDashboard,
+  MessageSquare,
+  Clock,
+  Users,
+  RotateCcw,
+  FileEdit,
+  Smartphone,
+  Cpu,
+  Activity,
+  Sliders,
+  Settings,
+} from "lucide-react";
 import { cn } from "@/lib/cn";
 
-type Item = { href: string; nome: string; contagem?: number };
+type ItemNav = {
+  href: string;
+  nome: string;
+  icone: React.ComponentType<{ className?: string; strokeWidth?: number }>;
+  contagem?: number;
+};
 
 export function Rail({
   abertas,
   rascunhos,
+  followups = 0,
   motorLigado,
 }: {
   abertas: number;
   rascunhos: number;
+  followups?: number;
   motorLigado: boolean;
 }) {
-  const trabalho: Item[] = [
-    { href: "/fila", nome: "Fila", contagem: abertas },
-    { href: "/rascunhos", nome: "Rascunhos", contagem: rascunhos },
-    { href: "/conversas", nome: "Conversas" },
-    // Onde o consultor confere o que o agente fez sozinho. Fica no bloco de
-    // trabalho, não em ajustes: em modo autônomo isso é rotina, não config.
-    { href: "/atividade", nome: "Atividade" },
-    { href: "/meu-jeito", nome: "Meu jeito" },
+  const operacao: ItemNav[] = [
+    { href: "/visao-geral", nome: "Visão Geral", icone: LayoutDashboard },
+    { href: "/conversas", nome: "Atendimento", icone: MessageSquare },
+    { href: "/fila", nome: "Fila de Triage", icone: Clock, contagem: abertas },
+    { href: "/clientes", nome: "CRM & Clientes", icone: Users },
+    { href: "/followups", nome: "Follow-ups", icone: RotateCcw, contagem: followups },
+    { href: "/rascunhos", nome: "Rascunhos", icone: FileEdit, contagem: rascunhos },
   ];
 
-  const ajustes: Item[] = [
-    // As listas ficam em ajustes: sobe uma vez por mês, não é rotina diária.
-    { href: "/listas", nome: "Listas" },
-    { href: "/conexao", nome: "Conexão" },
-    { href: "/conta", nome: "Conta" },
+  const plataforma: ItemNav[] = [
+    { href: "/conexao", nome: "WhatsApp Evolution", icone: Smartphone },
+    { href: "/ia", nome: "Modelos IA", icone: Cpu },
+    { href: "/atividade", nome: "Auditoria & Logs", icone: Activity },
+    { href: "/meu-jeito", nome: "Playbook CapitalCred", icone: Sliders },
+    { href: "/configuracoes", nome: "Ajustes", icone: Settings },
   ];
 
   return (
-    <>
-      {/* Desktop: coluna fixa a esquerda. */}
-      <nav
-        aria-label="Seções"
-        className="hidden w-[212px] shrink-0 flex-col border-r border-fio py-3 md:flex"
-      >
-        <div className="flex flex-col gap-px px-2">
-          {trabalho.map((item) => (
-            <LinkDoRail key={item.href} item={item} />
-          ))}
+    <nav
+      aria-label="Menu principal"
+      className="hidden w-[220px] shrink-0 flex-col justify-between border-r border-fio bg-sup p-3 md:flex select-none"
+    >
+      <div className="flex flex-col gap-5">
+        <div>
+          <span className="px-2.5 text-[11px] font-mono uppercase tracking-wider text-texto3 font-medium">
+            Operação
+          </span>
+          <div className="mt-1 flex flex-col gap-0.5">
+            {operacao.map((item) => (
+              <LinkDoRail key={item.href} item={item} />
+            ))}
+          </div>
         </div>
-        <div className="mx-4 my-3 h-px bg-fio" />
-        <div className="flex flex-col gap-px px-2">
-          {ajustes.map((item) => (
-            <LinkDoRail
-              key={item.href}
-              item={item}
-              ponto={item.href === "/conexao" ? motorLigado : undefined}
+
+        <div>
+          <span className="px-2.5 text-[11px] font-mono uppercase tracking-wider text-texto3 font-medium">
+            Plataforma
+          </span>
+          <div className="mt-1 flex flex-col gap-0.5">
+            {plataforma.map((item) => (
+              <LinkDoRail key={item.href} item={item} />
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Rodapé — Estado do Sistema */}
+      <div className="mt-auto pt-3 border-t border-fio">
+        <Link
+          href="/conexao"
+          className="flex items-center justify-between p-2 rounded-[6px] hover:bg-sup2 transition-colors group"
+        >
+          <div className="flex items-center gap-2">
+            <span
+              className={cn(
+                "h-1.5 w-1.5 rounded-full shrink-0",
+                motorLigado ? "bg-jade" : "bg-erro"
+              )}
             />
-          ))}
-        </div>
-      </nav>
-
-      {/* Celular: faixa rolavel logo abaixo da barra de estado. */}
-      <nav
-        aria-label="Seções"
-        className="flex gap-1 overflow-x-auto border-b border-fio px-3 py-2 md:hidden"
-      >
-        {[...trabalho, ...ajustes].map((item) => (
-          <AbaDoCelular key={item.href} item={item} />
-        ))}
-      </nav>
-    </>
+            <div className="flex flex-col">
+              <span className="text-[12px] font-medium text-texto leading-none">
+                Sistema
+              </span>
+              <span className="text-[11px] text-texto2 mt-0.5 leading-none">
+                {motorLigado ? "Operacional" : "Desconectado"}
+              </span>
+            </div>
+          </div>
+          <span className="text-[11px] font-mono text-texto3">v0.2</span>
+        </Link>
+      </div>
+    </nav>
   );
 }
 
-function LinkDoRail({ item, ponto }: { item: Item; ponto?: boolean }) {
+function LinkDoRail({ item }: { item: ItemNav }) {
   const caminho = usePathname();
-  const ativo = caminho === item.href || caminho.startsWith(item.href + "/");
+  const ativo =
+    caminho === item.href ||
+    (item.href !== "/visao-geral" && caminho.startsWith(item.href + "/"));
+  const Icone = item.icone;
 
   return (
     <Link
       href={item.href}
       aria-current={ativo ? "page" : undefined}
       className={cn(
-        "group flex h-8 items-center justify-between rounded-md pl-3 pr-2.5 text-[13px]",
-        "transition-colors duration-100",
-        ativo ? "bg-sup text-texto" : "text-texto2 hover:bg-sup hover:text-texto"
+        "group flex h-8 items-center justify-between px-2.5 text-[13px] font-medium transition-colors cursor-pointer rounded-[4px]",
+        ativo
+          ? "bg-sup2 text-texto font-semibold border-l-2 border-jade rounded-l-none pl-2"
+          : "text-texto2 hover:bg-sup2 hover:text-texto"
       )}
     >
-      <span className="flex items-center gap-2">
-        <span
-          aria-hidden="true"
+      <div className="flex items-center gap-2">
+        <Icone
           className={cn(
-            "h-3.5 w-[2px] rounded-full transition-colors",
-            ativo ? "bg-jade" : "bg-transparent"
+            "h-3.5 w-3.5 shrink-0 transition-colors",
+            ativo ? "text-texto" : "text-texto3 group-hover:text-texto2"
           )}
+          strokeWidth={1.75}
         />
-        {item.nome}
-      </span>
+        <span className="tracking-tight">{item.nome}</span>
+      </div>
 
-      {typeof item.contagem === "number" && item.contagem > 0 ? (
-        <span
-          className={cn(
-            "num rounded-full px-1.5 py-0.5 text-[11px] leading-none",
-            item.href === "/fila" ? "bg-jade text-jade-texto" : "bg-sup2 text-texto2"
-          )}
-        >
+      {item.contagem !== undefined && item.contagem > 0 && (
+        <span className="font-mono text-[11px] font-semibold text-texto2">
           {item.contagem}
         </span>
-      ) : null}
-
-      {typeof ponto === "boolean" ? (
-        <span
-          aria-hidden="true"
-          className={cn("h-1.5 w-1.5 rounded-full", ponto ? "bg-jade" : "bg-texto3")}
-        />
-      ) : null}
-    </Link>
-  );
-}
-
-function AbaDoCelular({ item }: { item: Item }) {
-  const caminho = usePathname();
-  const ativo = caminho === item.href || caminho.startsWith(item.href + "/");
-
-  return (
-    <Link
-      href={item.href}
-      aria-current={ativo ? "page" : undefined}
-      className={cn(
-        "flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] whitespace-nowrap",
-        ativo ? "bg-sup text-texto" : "text-texto2"
       )}
-    >
-      {item.nome}
-      {typeof item.contagem === "number" && item.contagem > 0 ? (
-        <span
-          className={cn(
-            "num rounded-full px-1.5 text-[11px] leading-[16px]",
-            item.href === "/fila" ? "bg-jade text-jade-texto" : "bg-sup2 text-texto2"
-          )}
-        >
-          {item.contagem}
-        </span>
-      ) : null}
     </Link>
   );
 }

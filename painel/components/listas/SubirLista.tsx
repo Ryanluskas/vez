@@ -18,7 +18,7 @@ export function SubirLista() {
     <form
       ref={form}
       action={enviar}
-      className="rounded-lg border border-dashed border-fio bg-sup p-5"
+      className="rounded-2xl border border-fio bg-sup/50 backdrop-blur-xl p-5 sm:p-6 space-y-4 shadow-sm"
     >
       <div className="flex flex-wrap items-end gap-3">
         <label className="flex-1 min-w-[200px]">
@@ -29,26 +29,26 @@ export function SubirLista() {
             accept=".xlsx,.xls,.csv"
             required
             onChange={(e) => setArquivo(e.target.files?.[0]?.name ?? null)}
-            className="block w-full text-[12px] text-texto2 file:mr-3 file:cursor-pointer file:rounded-md file:border file:border-fio file:bg-fundo file:px-3 file:py-1.5 file:text-[12px] file:text-texto hover:file:border-fio-forte"
+            className="block w-full text-[13px] text-texto2 file:mr-3 file:cursor-pointer file:rounded-xl file:border file:border-fio file:bg-sup2 file:px-3 file:py-2 file:text-[12px] file:font-medium file:text-texto hover:file:border-fio-forte"
           />
         </label>
 
         <label className="flex-1 min-w-[160px]">
-          <span className="rotulo mb-1.5 block">Nome (opcional)</span>
+          <span className="rotulo mb-1.5 block">Nome da Lista (opcional)</span>
           <input
             type="text"
             name="nome"
-            placeholder={arquivo?.replace(/\.[^.]+$/, "") ?? "Amapá agosto"}
-            className="h-8 w-full rounded-md border border-fio bg-fundo px-2.5 text-[13px] text-texto placeholder:text-texto3 focus:border-jade focus:outline-none"
+            placeholder={arquivo?.replace(/\.[^.]+$/, "") ?? "Amapá Agosto"}
+            className="h-10 w-full rounded-xl border border-fio bg-sup2 px-3.5 text-[14px] text-texto placeholder:text-texto3 focus:border-jade focus:bg-sup focus:outline-none focus:ring-2 focus:ring-jade/20 transition-all"
           />
         </label>
 
         <button
           type="submit"
           disabled={carregando}
-          className="h-8 rounded-md bg-jade px-4 text-[13px] text-fundo transition-colors hover:bg-jade-forte disabled:opacity-50"
+          className="h-10 rounded-xl bg-jade px-5 text-[13px] font-medium text-jade-texto shadow-sm transition-all hover:bg-jade-forte active:scale-[0.98] disabled:opacity-40 cursor-pointer shrink-0"
         >
-          {carregando ? "Importando…" : "Subir"}
+          {carregando ? "Importando…" : "Importar Planilha"}
         </button>
       </div>
 

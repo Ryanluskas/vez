@@ -10,19 +10,19 @@ export function Campo({
   const idCampo = id ?? resto.name;
 
   return (
-    <label className="block" htmlFor={idCampo}>
-      <span className="mb-1.5 block text-[13px] text-texto2">{rotulo}</span>
+    <label className="block space-y-1.5" htmlFor={idCampo}>
+      <span className="block text-[13px] font-medium text-texto2">{rotulo}</span>
       <input
         id={idCampo}
         className={cn(
-          "h-10 w-full rounded-md border border-fio bg-sup px-3 text-[14px] text-texto",
-          "transition-colors duration-100 hover:border-fio-forte",
-          "focus:border-jade focus:outline-none focus-visible:outline-none",
+          "h-10 w-full rounded-xl border border-fio bg-sup2 px-3.5 text-[14px] text-texto placeholder:text-texto3",
+          "transition-all duration-150 hover:border-fio-forte",
+          "focus:border-jade focus:bg-sup focus:outline-none focus:ring-2 focus:ring-jade/20",
           className
         )}
         {...resto}
       />
-      {dica ? <span className="mt-1.5 block text-[12px] text-texto3">{dica}</span> : null}
+      {dica ? <span className="block text-[12px] text-texto3">{dica}</span> : null}
     </label>
   );
 }
