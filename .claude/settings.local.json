@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "PowerShell(\"node: \" + \\(node -v\\); \"npm: \" + \\(npm -v\\); $o = Get-Command ollama -ErrorAction SilentlyContinue; if \\($o\\) { \"ollama: \" + $o.Source } else { \"ollama: NAO INSTALADO\" }; $g = Get-Command git -ErrorAction SilentlyContinue; if \\($g\\) { \"git: \" + \\(git --version\\) } else { \"git: NAO INSTALADO\" })"
-    ]
-  }
-}
