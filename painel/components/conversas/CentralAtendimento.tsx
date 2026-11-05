@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useTransition, useRef, useEffect } from "react";
+import React, { useState, useTransition, useRef } from "react";
 import {
   MessageSquare,
   Send,
@@ -107,11 +107,11 @@ export function CentralAtendimento({
     });
   }
 
-  useEffect(() => {
-    if (conversaAtiva) {
-      setObservacaoLocal(conversaAtiva.observacoes || "");
-    }
-  }, [conversaAtiva?.id, conversaAtiva?.observacoes]);
+  const [prevConversaId, setPrevConversaId] = useState<string | null>(null);
+  if (conversaAtiva && conversaAtiva.id !== prevConversaId) {
+    setPrevConversaId(conversaAtiva.id);
+    setObservacaoLocal(conversaAtiva.observacoes || "");
+  }
 
   function handlePausarRetomarIa(pausar: boolean) {
     if (!conversaAtiva) return;
@@ -699,7 +699,7 @@ export function CentralAtendimento({
                 }
                 className="px-2.5 py-1 rounded-lg bg-sup2 hover:bg-sup text-[11px] text-texto2 hover:text-texto border border-fio transition-all shrink-0 cursor-pointer"
               >
-                ✅ Confirmar "Só isso mesmo?"
+                ✅ Confirmar &quot;Só isso mesmo?&quot;
               </button>
               <button
                 type="button"

@@ -332,7 +332,7 @@ test("Cenários M e N — Dossiê: bloqueia envio sem aprovação, detecta adult
     status: "conferido_pendente_aprovacao",
     texto_pagamento: "TEXTO CORRENTISTA SANTANDER COM MAIS DE CINQUENTA CARACTERES PARA TESTE.",
   };
-  const autM = autorizarEnvioAoGrupo({ operacao: opSemAprovacao });
+  const autM = autorizarEnvioAoGrupo({ operacao: opSemAprovacao, userId: "tenant_1" });
   assert.equal(autM.autorizado, false);
 
   // Cenário N: Aprovação legítima seguida de adulteração de anexo ou falha parcial no envio
@@ -381,6 +381,7 @@ test("Cenários M e N — Dossiê: bloqueia envio sem aprovação, detecta adult
     () =>
       encaminharDossieAoGrupo({
         operacao: opAprovada,
+        userId: "tenant_1",
         documentos: docsAdulterados,
         grupoDestinoJid: "120363000000@g.us",
         instanciaEvolution: "instancia_tenant_1",

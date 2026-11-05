@@ -12,29 +12,49 @@ import crypto from "node:crypto";
   2. Proteção contra adulteração de anexos e dados bancários (documentosHash, dadosBancariosHash).
   3. Proteção contra Replay Attack e expiração temporal máxima de 24 horas.
   4. Comparação em tempo constante (crypto.timingSafeEqual) contra timing attacks.
+  5. Isolamento multi-tenant estrito (fail-closed): recusa se executor ou operação não possuírem identificador de tenant.
   ============================================================================
 */
 
 const SEGREDOS_PROIBIDOS = new Set([
   "vez_dossie_hmac_secret_master_key_2026",
+  "vez_segredo_mestre_hmac_capitalcred_2026_super_seguro",
+  "vez_evolution_api_key_capitalcred_2026",
+  "vez_webhook_secret_capitalcred_2026",
+  "evolution_secret_pass_2026",
+  "substitua_por_segredo_hmac_exclusivo_minimo_32_chars",
+  "substitua_por_chave_evolution_aleatoria_32_chars",
+  "substitua_por_webhook_secret_aleatorio_32_chars",
+  "substitua_por_senha_db_evolution_forte",
   "changeme",
   "secret",
   "default",
   "exemplo",
   "123456",
   "test",
+  "password",
 ]);
 
 /**
  * Obtém e valida o segredo HMAC-SHA256 configurado no ambiente.
- * Falha de forma segura (fail-closed) caso o segredo esteja ausente, fraco ou use valor de exemplo.
+ * Falha de forma segura (fail-closed) caso o segredo esteja ausente, fraco ou use valor de exemplo/placeholder.
  */
 export function obterSegredoHmac(segredoExplicito = null) {
   const candidato = String(segredoExplicito ?? process.env.DOSSIE_HMAC_SECRET ?? "").trim();
   if (!candidato || candidato.length < 32) {
     return null;
   }
-  if (SEGREDOS_PROIBIDOS.has(candidato.toLowerCase())) {
+  const lower = candidato.toLowerCase();
+  if (SEGREDOS_PROIBIDOS.has(lower)) {
+    return null;
+  }
+  if (
+    lower.includes("substitua_por") ||
+    lower.includes("changeme") ||
+    lower.includes("mude_esta") ||
+    lower.includes("seu_segredo") ||
+    lower.includes("exemplo")
+  ) {
     return null;
   }
   return candidato;
@@ -214,6 +234,7 @@ export function migrarOperacaoLegadaParaReaprovacao(operacao = {}) {
 
 /**
  * Barreira de segurança mandatória antes de qualquer envio ao WhatsApp.
+ * Exige isolamento multi-tenant (fail-closed), operador humano, texto de pagamento e integridade HMAC.
  */
 export function autorizarEnvioAoGrupo({ operacao = {}, userId = null, segredo = null } = {}) {
   if (!operacao || typeof operacao !== "object") {
@@ -231,20 +252,20 @@ export function autorizarEnvioAoGrupo({ operacao = {}, userId = null, segredo = 
     };
   }
 
-  // 1. Status deve ser expressamente 'aprovado'
-  if (operacao.status !== "aprovado") {
+  // 1. Status deve ser expressamente 'aprovado' ou 'erro_envio_parcial' (para retentativa de envio pendente)
+  if (operacao.status !== "aprovado" && operacao.status !== "erro_envio_parcial") {
     return {
       autorizado: false,
       motivo: `Operação com status "${operacao.status}"; envio ao grupo proibido sem aprovação prévia.`,
     };
   }
 
-  // 2. Isolamento multi-tenant quando userId do executor é informado
+  // 2. Isolamento multi-tenant estrito e obrigatório (fail-closed)
   const tenantOperacao = operacao.user_id || operacao.id_organizacao || null;
-  if (userId && tenantOperacao && String(tenantOperacao) !== String(userId)) {
+  if (!userId || !tenantOperacao || String(tenantOperacao) !== String(userId)) {
     return {
       autorizado: false,
-      motivo: "Violação de isolamento multi-tenant: operação pertence a outra organização.",
+      motivo: "Violação de isolamento multi-tenant: identificador do executor ou da operação ausente ou não correspondente.",
     };
   }
 

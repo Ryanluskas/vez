@@ -340,7 +340,7 @@ test("HMAC Adversarial: Tentativa de envio para JID não oficial (não @g.us) é
   };
 
   await assert.rejects(
-    () => encaminharDossieAoGrupo({ operacao: opValida, grupoDestinoJid: "5511999999999@s.whatsapp.net" }),
+    () => encaminharDossieAoGrupo({ operacao: opValida, userId: "tenant_alpha", grupoDestinoJid: "5511999999999@s.whatsapp.net" }),
     /JID do grupo de pagamento inválido.*Deve ser um grupo do WhatsApp \(@g\.us\)/
   );
 });

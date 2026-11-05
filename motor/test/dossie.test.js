@@ -162,12 +162,13 @@ test("aprovação estrita bloqueia envio ao grupo sem autorização humana expre
   const txt = "Texto padronizado correntista Santander com mais de cinquenta caracteres para validação completa.";
   const userId = "user-123";
   const ts = new Date().toISOString();
-  const hash = gerarHashAprovacao({ idOperacao: idOp, codigoOperacao: codOp, textoPagamento: txt, userId, timestamp: ts });
+  const hash = gerarHashAprovacao({ idOperacao: idOp, codigoOperacao: codOp, idOrganizacao: userId, textoPagamento: txt, userId, timestamp: ts });
 
   assert.equal(
     validarIntegridadeAprovacao({
       idOperacao: idOp,
       codigoOperacao: codOp,
+      idOrganizacao: userId,
       textoPagamento: txt,
       userId,
       timestamp: ts,
@@ -179,6 +180,7 @@ test("aprovação estrita bloqueia envio ao grupo sem autorização humana expre
   const opAprovada = {
     id: idOp,
     codigo_operacao: codOp,
+    user_id: userId,
     status: "aprovado",
     aprovado_por: userId,
     aprovado_em: ts,
@@ -186,7 +188,7 @@ test("aprovação estrita bloqueia envio ao grupo sem autorização humana expre
     texto_pagamento: txt,
   };
 
-  const checagemAprovada = autorizarEnvioAoGrupo({ operacao: opAprovada });
+  const checagemAprovada = autorizarEnvioAoGrupo({ operacao: opAprovada, userId });
   assert.equal(checagemAprovada.autorizado, true);
 
   // Teste de adulteração pós-aprovação (anti-tampering)
@@ -194,7 +196,7 @@ test("aprovação estrita bloqueia envio ao grupo sem autorização humana expre
     ...opAprovada,
     texto_pagamento: txt + " [VALOR ALTERADO INDEVIDAMENTE]",
   };
-  const checagemAdulterada = autorizarEnvioAoGrupo({ operacao: opAdulterada });
+  const checagemAdulterada = autorizarEnvioAoGrupo({ operacao: opAdulterada, userId });
   assert.equal(checagemAdulterada.autorizado, false);
   assert.match(checagemAdulterada.motivo, /adulterados/i);
 
@@ -209,6 +211,7 @@ test("aprovação estrita bloqueia envio ao grupo sem autorização humana expre
 
   const resultado = await encaminharDossieAoGrupo({
     operacao: opAprovada,
+    userId,
     grupoDestinoJid: "1203630456789@g.us",
     clienteTelefone: "5562999998888",
     instanciaEvolution: "instancia_teste",

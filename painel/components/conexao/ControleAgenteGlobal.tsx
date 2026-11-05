@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useTransition } from "react";
-import { Bot, Power, Zap, Clock, ShieldCheck, CheckCircle2, AlertTriangle } from "lucide-react";
+import { Bot, Power, Zap, Clock, ShieldCheck, CheckCircle2 } from "lucide-react";
 import { AppleButton } from "@/components/ui/apple/AppleButton";
 import { AppleBadge } from "@/components/ui/apple/AppleBadge";
 import { alternarAgenteGlobal } from "@/lib/acoes-painel";
@@ -16,7 +16,6 @@ interface ControleAgenteGlobalProps {
 export function ControleAgenteGlobal({
   agenteAtivoInicial = true,
   marcoAtivacaoInicial,
-  totalCampanhas = 0,
 }: ControleAgenteGlobalProps) {
   const [ativo, setAtivo] = useState(agenteAtivoInicial);
   const [marco, setMarco] = useState(marcoAtivacaoInicial);

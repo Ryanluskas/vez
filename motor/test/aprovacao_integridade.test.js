@@ -59,6 +59,7 @@ test("Integridade Criptográfica: autorizarEnvioAoGrupo bloqueia fraude pós-apr
   const hash = gerarHashAprovacao({
     idOperacao: idOp,
     codigoOperacao: codOp,
+    idOrganizacao: userId,
     textoPagamento: textoValido,
     userId,
     timestamp: ts,
@@ -67,6 +68,7 @@ test("Integridade Criptográfica: autorizarEnvioAoGrupo bloqueia fraude pós-apr
   const opLegitima = {
     id: idOp,
     codigo_operacao: codOp,
+    user_id: userId,
     status: "aprovado",
     aprovado_por: userId,
     aprovado_em: ts,
@@ -74,7 +76,7 @@ test("Integridade Criptográfica: autorizarEnvioAoGrupo bloqueia fraude pós-apr
     texto_pagamento: textoValido,
   };
 
-  const checagemLegitima = autorizarEnvioAoGrupo({ operacao: opLegitima });
+  const checagemLegitima = autorizarEnvioAoGrupo({ operacao: opLegitima, userId });
   assert.equal(checagemLegitima.autorizado, true);
 
   // Tentativa de alterar o texto de pagamento diretamente no banco pós-aprovação
@@ -82,7 +84,7 @@ test("Integridade Criptográfica: autorizarEnvioAoGrupo bloqueia fraude pós-apr
     ...opLegitima,
     texto_pagamento: "TEXTO ADULTERADO: Troca da conta de destino ou valor sem re-aprovação humana.",
   };
-  const checagemFraudada = autorizarEnvioAoGrupo({ operacao: opFraudada });
+  const checagemFraudada = autorizarEnvioAoGrupo({ operacao: opFraudada, userId });
   assert.equal(checagemFraudada.autorizado, false);
   assert.match(checagemFraudada.motivo, /adulterados|expirada|violação/i);
 });

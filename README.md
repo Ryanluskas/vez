@@ -36,7 +36,7 @@ Nunca preenche a lacuna.
 | Peça | Onde roda | O que faz |
 | --- | --- | --- |
 | **Painel** (`painel/`) | Vercel, acessível de qualquer lugar | Fila, rascunhos, conversas, atividade do agente, modo |
-| **Motor** (`motor/`) | No PC do consultor | WhatsApp Web + Ollama, sincroniza com o Supabase |
+| **Motor** (`motor/`) | No PC do consultor | Evolution API v2 (padrão) / WhatsApp Web (legado) + Ollama, sincroniza com o Supabase |
 
 O login amarra as duas. Cada conta só enxerga os próprios dados (Row-Level Security no
 Postgres). O motor roda local de propósito: é isso que mantém as mensagens dos clientes
@@ -50,7 +50,7 @@ Concluído e funcionando:
 - [x] **Motor** — WhatsApp Web multi-número, QR no painel, importação de histórico
 - [x] **Regra de ouro** — 5 barreiras, cobertas por teste
 - [x] **Memória por cliente** — nome, convênio, banco, objetivo, documentos entregues
-- [x] **Perguntas mínimas** — pede só o que falta, no máximo 2 por mensagem
+- [x] **Perguntas mínimas** — pede só o que falta, no máximo 1 por mensagem (regra estrita: MAXIMO_POR_MENSAGEM = 1)
 - [x] **Orquestrador** — decisão determinística, função pura, testável sem IA
 - [x] **Ferramentas** — 11 ações validadas, com limite, dedup, timeout e registro
 - [x] **Handoff com continuação** — você responde uma vez, o agente segue sozinho
@@ -149,6 +149,11 @@ de novo sem quebrar nada. Separados, nesta ordem:
 | `20_estado_comercial.sql` | Etapa da negociação, origem, simulação já passada |
 | `21_pendencia_concluida.sql` | Estado concluído de pendências |
 | `22_evolution_e_followups.sql` | Evolution API, fila de follow-ups supervisionados e telemetria multiprovedor de IA |
+| `23_consumo_ia_rls.sql` | Políticas RLS e telemetria para custos e consumo de modelos de IA |
+| `24_auditoria_seguranca_fix.sql` | Endurecimento de isolamento multi-tenant e segurança em banco |
+| `25_dossie_pagamento.sql` | Dossiê Santander, conferência de contratos e tabela `operacoes_pagamento` |
+| `26_piloto_controlado_e_campanhas.sql` | Allowlist de telefones para piloto controlado e integração Botzapzap |
+| `27_estado_conversacional_e_seguranca_dossie.sql` | Estado conversacional explícito, endurecimento HMAC-SHA256 e idempotência de envio |
 
 O `02` é o que isola os dados de cada consultor: a consulta no fim dele tem que mostrar
 `rls_ligado = true` e 4 políticas por tabela.
@@ -171,12 +176,22 @@ docker compose up -d
 
 No seu `motor/.env`:
 ```env
+# Gateway padrão oficial (Evolution API v2)
 VEZ_GATEWAY=evolution
 EVOLUTION_SERVER_URL=http://localhost:8080
-EVOLUTION_APIKEY=sua_chave_global_da_evolution
+EVOLUTION_API_KEY=sua_chave_global_da_evolution
 VEZ_WEBHOOK_PORT=3333
 VEZ_WEBHOOK_SECRET=token_secreto_para_validar_webhooks
+
+# Segurança Criptográfica do Dossiê Santander
+DOSSIE_HMAC_SECRET=seu_segredo_hmac_exclusivo_minimo_32_chars
+GRUPO_PAGAMENTO_JID=120363000000000000@g.us
 ```
+
+> **Geração de Segredos:** Nunca utilize chaves de exemplo ou senhas previsíveis. Gere segredos criptograficamente seguros (HMAC, Webhook, API Key) executando no terminal:
+> ```bash
+> node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+> ```
 
 ## Arquitetura Multiprovedor de IA
 
@@ -528,7 +543,7 @@ interpretação, e assim a lógica sobrevive a troca de modelo.
 ninguém pode responder ainda. Isso não fura a regra de ouro: o que sai é uma pergunta,
 sem número nenhum.
 
-No máximo **dois pedidos por mensagem**, e ele desiste do que já pediu duas vezes.
+No máximo **um pedido por mensagem** (`MAXIMO_POR_MENSAGEM = 1`), e ele desiste do que já pediu duas vezes. Isso evita mensagens longas com cara de formulário ou interrogatório.
 
 ## O que o bot sabe, e o que ele copia
 
@@ -570,7 +585,7 @@ nunca em conversa silenciada, e **nunca em quem está esperando você**.
 npm test --prefix motor
 ```
 
-291 testes, sem rede e sem IA — rodam em segundos.
+502 testes automatizados, sem rede e sem IA — rodam em segundos cobrindo regressão comercial, integridade criptográfica HMAC, concorrência, multi-tenancy e resiliência.
 
 Além deles há verificação de ponta a ponta contra o Supabase e o Ollama reais:
 
@@ -601,6 +616,12 @@ importa uma planilha e confere a conta da porcentagem. Todos limpam o que criam.
 | `conversa-comercial.test.js` | Estado, referências, não repetir pergunta — e a conversa do Ademar inteira |
 | `lista.test.js` | Porcentagem, campos liberados, telefone, e o valor cheio sendo recusado |
 | `redator.test.js` | O atalho que evita gerar texto que seria descartado |
+| `dossie.test.js` | Dossiê Santander, cálculo de redução e conferência documental |
+| `aprovacao_integridade.test.js` | Assinatura HMAC-SHA256, anti-tampering e timingSafeEqual |
+| `auditoria_adversarial_independente.test.js` | Bateria adversarial de invasão, fraude e isolamento multi-tenant |
+| `regressao_conversacional_completa.test.js` | Cenários A até P cobrindo todo o ciclo conversacional |
+| `piloto_controlado.test.js` | Validação da allowlist do piloto controlado e isolamento |
+| `revisao_final_seguranca_e_ordem.test.js` | Precedência estrita de pendências humanas, fail-closed multi-tenant e idempotência |
 
 ## Publicar na Vercel
 
@@ -657,7 +678,7 @@ motor/
       ferramentas.js  o registro: 11 ações com contrato
       executor.js     limite, dedup, timeout, erro, registro
       planejar.js     o modelo escolhe o que consultar (só leitura)
-  test/             291 testes
+  test/             502 testes
   src/e2e/          verificação contra o sistema real
   sessao/           credenciais do pareamento — gitignorado
 ```

@@ -130,7 +130,25 @@ export function decidir(retrato) {
     };
   }
 
-  /* ---- 1d. Tratamento Consultivo de Objeções e Aceite ---- */
+  /*
+    ---- 2. A bola já está com o consultor ----
+    Prioridade sobre objeções comerciais e fechamento: se o consultor já está
+    cuidando do cliente ou há pendência humana aberta, o bot NUNCA responde
+    com objeções automáticas ou pedidos de documentos. Ele fica quieto e aguarda.
+  */
+  if (
+    conversa.estagio === "aguardando_voce" ||
+    conversa.estagio === "aguardando_consultor" ||
+    conversa.temPendenciaAberta
+  ) {
+    return {
+      acao: ACOES.AGUARDAR,
+      confianca: CONFIANCA.ESTADO,
+      motivo: "já existe pergunta esperando você nesta conversa",
+    };
+  }
+
+  /* ---- 3. Tratamento Consultivo de Objeções e Aceite ---- */
   if (objecao) {
     if (objecao.tipo === "acordo_fechamento") {
       const pedidoFechamento = montarPedido(memoria, { para: "fechar" });
@@ -187,17 +205,8 @@ export function decidir(retrato) {
     }
   }
 
-  /* ---- 2. A bola já está com o consultor ---- */
-  if (conversa.estagio === "aguardando_voce" || conversa.temPendenciaAberta) {
-    return {
-      acao: ACOES.AGUARDAR,
-      confianca: CONFIANCA.ESTADO,
-      motivo: "já existe pergunta esperando você nesta conversa",
-    };
-  }
-
   /*
-    ---- 3. Anti-loop ----
+    ---- 4. Anti-loop ----
     O bot falou três vezes seguidas e o cliente não respondeu. Falar uma
     quarta não convence ninguém — ou a conversa morreu, ou o bot está
     perguntando algo que o cliente não sabe responder. Nos dois casos quem
@@ -214,7 +223,7 @@ export function decidir(retrato) {
   }
 
   /*
-    ---- 3b. Freio do ping-pong ----
+    ---- 4b. Freio do ping-pong ----
     Já foi pra sua mão três vezes e voltou. O bot para de tentar e entrega
     a conversa: continua gravando tudo, mas não decide mais nada sozinho
     ali. É diferente de silenciar — silenciado é quem não é cliente; este
@@ -241,7 +250,7 @@ export function decidir(retrato) {
 
   const { categoria, precisaDoRyan, motivo, decidiuNaRegra } = classificacao;
 
-  /* ---- 4. Assunto de dinheiro ou atendimento humano ---- */
+  /* ---- 5. Assunto de dinheiro ou atendimento humano ---- */
   if (precisaDoRyan) {
     if (motivo === "pediu atendimento humano") {
       return {
@@ -302,7 +311,7 @@ export function decidir(retrato) {
     };
   }
 
-  /* ---- 5. O bot dá conta ---- */
+  /* ---- 6. O bot dá conta ---- */
   return {
     acao: ACOES.RESPONDER,
     confianca: categoria === "outro" ? CONFIANCA.INCERTO : CONFIANCA.CLASSIFICADOR,

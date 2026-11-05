@@ -2,7 +2,7 @@
 -- 27_ESTADO_CONVERSACIONAL_E_SEGURANCA_DOSSIE.SQL
 -- Evolução do estado conversacional explícito em public.memoria e
 -- endurecimento criptográfico/idempotência em public.operacoes_pagamento.
--- Idempotente e reversível (inclui bloco de rollback comentado ao final).
+-- Idempotente e reversível (inclui bloco de rollback completo ao final).
 -- ============================================================================
 
 -- 1. Estado conversacional explícito na tabela public.memoria
@@ -23,7 +23,7 @@ alter table public.operacoes_pagamento
   add column if not exists requer_reaprovacao boolean not null default false,
   add column if not exists motivo_reaprovacao text;
 
--- 3. Atualização da constraint de status de operacoes_pagamento para incluir erro_envio_parcial e conferido_pendente_aprovacao
+-- 3. Atualização da constraint de status de operacoes_pagamento para incluir erro_envio_parcial, em_encaminhamento e conferido_pendente_aprovacao
 do $$
 begin
   if exists (
@@ -47,6 +47,7 @@ alter table public.operacoes_pagamento
       'conferido_pendente_aprovacao',
       'pendente_aprovacao',
       'aprovado',
+      'em_encaminhamento',
       'encaminhado',
       'erro_envio_parcial',
       'rejeitado',
@@ -55,9 +56,10 @@ alter table public.operacoes_pagamento
   );
 
 -- 4. Migração controlada de operações legadas aprovadas sem hashes completos ou com assinatura legada
+-- Padronizado em 'conferido_pendente_aprovacao' conforme migration 25 e motor/src/dossie/aprovacao.js
 update public.operacoes_pagamento
 set
-  status = 'pendente_aprovacao',
+  status = 'conferido_pendente_aprovacao',
   hash_aprovacao = null,
   aprovado_em = null,
   requer_reaprovacao = true,
@@ -81,9 +83,13 @@ create unique index if not exists idx_operacoes_pagamento_nonce_unico
 
 -- ============================================================================
 -- ROLLBACK REVERSÍVEL (executar apenas se necessário reverter a migration 27)
+-- Restaura integralmente o estado estrutural e as constraints da migration 25
 -- ============================================================================
 -- drop index if exists public.idx_operacoes_pagamento_nonce_unico;
 -- drop index if exists public.idx_operacoes_pagamento_status_tenant;
+-- alter table public.operacoes_pagamento drop constraint if exists operacoes_pagamento_status_check;
+-- alter table public.operacoes_pagamento add constraint operacoes_pagamento_status_check
+--   check (status in ('em_coleta', 'conferido_pendente_aprovacao', 'aprovado', 'encaminhado', 'rejeitado'));
 -- alter table public.operacoes_pagamento
 --   drop column if exists motivo_reaprovacao,
 --   drop column if exists requer_reaprovacao,

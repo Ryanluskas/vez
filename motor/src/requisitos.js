@@ -104,7 +104,7 @@ function exigidosPara(para, estado) {
 
   Uma pergunta, resposta, próxima pergunta. É como a conversa acontece.
 */
-const MAXIMO_POR_MENSAGEM = 1;
+export const MAXIMO_POR_MENSAGEM = 1;
 
 function jaTem(memoria, chave) {
   if (!memoria) return false;

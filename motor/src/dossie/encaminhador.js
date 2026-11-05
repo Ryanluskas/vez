@@ -6,9 +6,24 @@ import { log } from "../log.js";
   ============================================================================
   ENCAMINHADOR DO DOSSIÊ DE PAGAMENTO — EVOLUTION API
   Dispara o texto aprovado e os documentos para o grupo de WhatsApp oficial
-  e atualiza o cliente e o CRM com controle de idempotência e falha parcial.
+  e atualiza o cliente e o CRM com controle de idempotência, validação de
+  retorno de envio da Evolution e recuperação consistente sob falha parcial.
   ============================================================================
 */
+
+function verificarRespostaEnvio(res, tipo) {
+  if (res && typeof res === "object") {
+    if (
+      res.ok === false ||
+      res.error ||
+      (typeof res.status === "number" && res.status >= 400) ||
+      (typeof res.statusCode === "number" && res.statusCode >= 400)
+    ) {
+      const errDetalhe = res.error || res.message || res.statusText || JSON.stringify(res);
+      throw new Error(`Falha no envio de ${tipo}: ${errDetalhe}`);
+    }
+  }
+}
 
 export async function encaminharDossieAoGrupo({
   operacao,
@@ -20,14 +35,20 @@ export async function encaminharDossieAoGrupo({
   supabase,
   userId = null,
 } = {}) {
-  // 1. Verificação de barreira estrita de aprovação humana e integridade HMAC
+  // 1. Validação de formato do JID do grupo de destino (@g.us obrigatório)
+  const grupo = grupoDestinoJid || operacao?.grupo_destino_jid;
+  if (!grupo || !grupo.includes("@g.us")) {
+    throw new Error(`JID do grupo de pagamento inválido: "${grupo}". Deve ser um grupo do WhatsApp (@g.us).`);
+  }
+
+  // 2. Verificação de barreira estrita de aprovação humana, integridade HMAC e isolamento multi-tenant (fail-closed)
   const checagem = autorizarEnvioAoGrupo({ operacao, userId });
   if (!checagem.autorizado) {
     log.erro(`[Dossiê ${operacao?.codigo_operacao}] Envio barrado: ${checagem.motivo}`);
     throw new Error(`Envio não autorizado: ${checagem.motivo}`);
   }
 
-  // 2. Validação de integridade dos anexos contra o hash aprovado (se registrado na aprovação)
+  // 3. Validação de integridade dos anexos contra o hash aprovado (se registrado na aprovação)
   if (operacao.documentos_hash && operacao.documentos_hash !== "sem_documentos") {
     const hashAtual = calcularHashDocumentos(documentos);
     if (hashAtual !== operacao.documentos_hash) {
@@ -35,11 +56,6 @@ export async function encaminharDossieAoGrupo({
       log.erro(`[Dossiê ${operacao?.codigo_operacao}] ${msg}`);
       throw new Error(`Envio não autorizado: ${msg}`);
     }
-  }
-
-  const grupo = grupoDestinoJid || operacao.grupo_destino_jid;
-  if (!grupo || !grupo.includes("@g.us")) {
-    throw new Error(`JID do grupo de pagamento inválido: "${grupo}". Deve ser um grupo do WhatsApp (@g.us).`);
   }
 
   const instancia =
@@ -59,19 +75,32 @@ export async function encaminharDossieAoGrupo({
   );
   let textoPagamentoEnviado = Boolean(operacao.texto_pagamento_enviado);
 
-  // 3. Dispara o texto de pagamento aprovado (evitando duplicidade em retentativa)
+  // 4. Dispara o texto de pagamento aprovado (evitando duplicidade em retentativa)
   if (clienteEvolution?.enviarTexto && !textoPagamentoEnviado) {
-    await clienteEvolution.enviarTexto({
+    const resTexto = await clienteEvolution.enviarTexto({
       nomeInstancia: instancia,
       instancia,
       numero: grupo,
       para: grupo,
       texto: operacao.texto_pagamento,
     });
+    verificarRespostaEnvio(resTexto, "texto do dossiê");
     textoPagamentoEnviado = true;
+
+    // Persistência imediata do texto enviado para garantir idempotência em caso de crash subsequente
+    if (supabase) {
+      await supabase
+        .from("operacoes_pagamento")
+        .update({
+          texto_pagamento_enviado: true,
+          grupo_destino_jid: grupo,
+          atualizado_em: new Date().toISOString(),
+        })
+        .eq("id", operacao.id);
+    }
   }
 
-  // 4. Dispara cada mídia/documento anexado ao dossiê com rastreamento de falhas
+  // 5. Dispara cada mídia/documento anexado ao dossiê com rastreamento incremental e idempotente
   const falhasAnexos = [];
   for (let idx = 0; idx < documentos.length; idx++) {
     const doc = documentos[idx];
@@ -86,7 +115,7 @@ export async function encaminharDossieAoGrupo({
       const nomeArquivo = doc.arquivo_nome || doc.nome || "documento.pdf";
       const mimetype = doc.mimetype || "application/pdf";
       try {
-        await clienteEvolution.enviarMedia({
+        const resMedia = await clienteEvolution.enviarMedia({
           nomeInstancia: instancia,
           instancia,
           numero: grupo,
@@ -100,7 +129,19 @@ export async function encaminharDossieAoGrupo({
           caption: legenda,
           legenda,
         });
+        verificarRespostaEnvio(resMedia, `anexo "${nomeArquivo}"`);
         documentosEnviados.add(chaveDoc);
+
+        // Persistência incremental dos anexos enviados
+        if (supabase) {
+          await supabase
+            .from("operacoes_pagamento")
+            .update({
+              documentos_enviados: Array.from(documentosEnviados),
+              atualizado_em: new Date().toISOString(),
+            })
+            .eq("id", operacao.id);
+        }
       } catch (err) {
         log.erro(`[Dossiê] Falha ao enviar anexo "${nomeArquivo}": ${err.message}`);
         falhasAnexos.push(`${nomeArquivo}: ${err.message}`);
@@ -110,7 +151,7 @@ export async function encaminharDossieAoGrupo({
 
   const agora = new Date().toISOString();
 
-  // 5. Se houve falha em qualquer anexo, NÃO marca como 'encaminhado'
+  // 6. Se houve falha em qualquer anexo, NÃO marca como 'encaminhado'
   if (falhasAnexos.length > 0) {
     if (supabase) {
       await supabase
@@ -121,6 +162,7 @@ export async function encaminharDossieAoGrupo({
           documentos_enviados: Array.from(documentosEnviados),
           erro_envio: falhasAnexos.join("; "),
           grupo_destino_jid: grupo,
+          atualizado_em: agora,
         })
         .eq("id", operacao.id);
     }
@@ -133,7 +175,7 @@ export async function encaminharDossieAoGrupo({
     };
   }
 
-  // 6. Atualiza o status do dossiê no banco para 'encaminhado' e consome a aprovação
+  // 7. Atualiza o status do dossiê no banco para 'encaminhado' e consome a aprovação
   if (supabase) {
     await supabase
       .from("operacoes_pagamento")
@@ -145,10 +187,11 @@ export async function encaminharDossieAoGrupo({
         documentos_enviados: Array.from(documentosEnviados),
         erro_envio: null,
         grupo_destino_jid: grupo,
+        atualizado_em: agora,
       })
       .eq("id", operacao.id);
 
-    // 7. Atualiza a conversa do cliente no CRM
+    // 8. Atualiza a conversa do cliente no CRM
     await supabase
       .from("conversas")
       .update({
@@ -160,7 +203,7 @@ export async function encaminharDossieAoGrupo({
       .eq("id", operacao.id_conversa);
   }
 
-  // 8. Atualiza o cliente no WhatsApp com mensagem de status (se autorizado no piloto)
+  // 9. Atualiza o cliente no WhatsApp com mensagem de status (se autorizado no piloto)
   if (clienteTelefone && clienteEvolution?.enviarTexto) {
     if (telefoneAutorizadoNoPiloto(clienteTelefone)) {
       const msgCliente =

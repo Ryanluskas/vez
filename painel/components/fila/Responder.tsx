@@ -14,7 +14,6 @@ import {
   Calculator,
   Edit3,
   Sparkles,
-  ArrowRight,
   TrendingUp,
 } from "lucide-react";
 

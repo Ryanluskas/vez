@@ -461,7 +461,12 @@ test("SIMULAÇÃO 1: Cliente Tranquilo (Fluxo fluido sem questionário, simulaç
   // Turno 3: Consultor respondeu ou fechou pendência e cliente aceita fechar
   sim.sb.dados.pendencias.length = 0;
   sim.conversa.etapa = "proposta_enviada";
+  sim.conversa.estagio = "aguardando_bot";
+  sim.conversa.so_voce = false;
+  sim.conversa.soVoce = false;
   sim.sb.dados.conversas.get(sim.conversa.id).etapa = "proposta_enviada";
+  sim.sb.dados.conversas.get(sim.conversa.id).estagio = "aguardando_bot";
+  sim.sb.dados.conversas.get(sim.conversa.id).so_voce = false;
   const t3 = await sim.enviarMensagemCliente("Gostei da redução, quero fechar sim! Como faço?");
   // Verificação 4: Bot pede próximo documento um por vez, sem escolha forçada
   assert.ok(
@@ -531,7 +536,12 @@ test("SIMULAÇÃO 3: Cliente Chato (Reclama de 120 meses, desiste 'deixa pra lá
   // Simula resolução da pendência pelo consultor antes da objeção
   sim.sb.dados.pendencias.length = 0;
   sim.conversa.etapa = "proposta_enviada";
+  sim.conversa.estagio = "aguardando_bot";
+  sim.conversa.so_voce = false;
+  sim.conversa.soVoce = false;
   sim.sb.dados.conversas.get(sim.conversa.id).etapa = "proposta_enviada";
+  sim.sb.dados.conversas.get(sim.conversa.id).estagio = "aguardando_bot";
+  sim.sb.dados.conversas.get(sim.conversa.id).so_voce = false;
 
   // Turno 2: Cliente reclama do prazo
   const t2 = await sim.enviarMensagemCliente("120 meses é muito tempo! Vocês tão loucos? Não quero esse prazo longo.");
